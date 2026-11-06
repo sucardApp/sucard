@@ -1,0 +1,26 @@
+[package]
+name = "sucard"
+version = "0.1.0"
+edition = "2021"
+description = "素签：素材库兼待办。A lightweight desktop app for snippets and to-dos stored as plain Markdown."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/bestfullai/sucard"
+readme = "README.md"
+keywords = ["markdown", "todo", "notes", "egui", "desktop"]
+categories = ["gui", "text-editors"]
+
+[dependencies]
+eframe = "0.31"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 编辑框右键「粘贴」读剪贴板用；eframe 本身已经依赖它，不会多编译东西
+arboard = { version = "3.3", default-features = false }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[dev-dependencies]
+egui_kittest = "0.31"

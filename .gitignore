@@ -1,0 +1,13 @@
+# 编译输出
+/target/
+
+# 编辑器 / 系统文件
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 本地数据目录（如果在项目里试用过）
+.sucard/
