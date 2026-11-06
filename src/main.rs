@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod store;
+mod uninstall;
 
 use eframe::egui::{
     self, Color32, CursorIcon, FontFamily, Id, Key, Label, Rect, RichText, ScrollArea, Sense,
@@ -448,6 +449,11 @@ struct App {
     settings_open: bool,
     /// 等待确认的删除操作
     confirm: Option<Confirm>,
+    /// 卸载确认框开着；值是「同时删除数据」有没有勾
+    uninstall: Option<bool>,
+    /// 测试里不真的卸载，只记下确认时勾没勾删除数据
+    #[cfg(test)]
+    uninstall_ran: Option<bool>,
     /// 回收站里勾选的文档（批量彻底删除用）
     trash_checked: std::collections::BTreeSet<String>,
     /// 外观设置已应用到 egui（第一帧时应用）
@@ -488,6 +494,9 @@ impl App {
             rename_focus: false,
             settings_open: false,
             confirm: None,
+            uninstall: None,
+            #[cfg(test)]
+            uninstall_ran: None,
             trash_checked: Default::default(),
             ui_applied: false,
             ui_dirty: false,
@@ -661,8 +670,8 @@ impl App {
     /// 选中条目后的键盘操作：空格 完成/未完成，Delete 删除，回车 编辑，Esc 取消选中。
     /// 有输入框在打字时不处理。按键先被吃掉，免得勾选框等控件再响应一次。
     fn handle_keys(&mut self, ctx: &egui::Context, acts: &mut Vec<Act>) {
-        // 删除确认框开着：回车、Esc 归确认框
-        if self.confirm.is_some() {
+        // 删除确认框、卸载框开着：回车、Esc 归确认框
+        if self.confirm.is_some() || self.uninstall.is_some() {
             return;
         }
         let Some((id, place)) = self.selected.clone() else { return };
@@ -2743,6 +2752,7 @@ impl App {
 
         self.settings_window(ctx);
         self.confirm_dialog(ctx, &mut acts);
+        self.uninstall_dialog(ctx);
         self.apply(acts);
 
         // 外观设置：松开鼠标后再写盘，拖动条拖动过程中不反复写
@@ -2842,6 +2852,88 @@ impl App {
             self.confirm = None;
         } else if cancel || modal.should_close() {
             self.confirm = None;
+        }
+    }
+
+    /// 卸载确认框：列出会删除的东西，「同时删除我的数据」默认不勾；只能点按钮确认（不响应回车）
+    fn uninstall_dialog(&mut self, ctx: &egui::Context) {
+        let Some(mut delete_data) = self.uninstall else { return };
+        let exe = std::env::current_exe().unwrap_or_default();
+        let home = default_root(|k| std::env::var_os(k), cfg!(windows)).parent().map(Path::to_path_buf);
+        let plan = uninstall::plan(
+            &exe,
+            &self.store.root,
+            home.as_deref(),
+            std::env::var_os("SUCARD_DIR").is_some(),
+        );
+        let mut go = false;
+        let mut cancel = false;
+        let modal = egui::Modal::new(Id::new("uninstall")).show(ctx, |ui| {
+            ui.set_width(480.0);
+            let weak = ui.visuals().weak_text_color();
+            ui.strong("卸载素签");
+            ui.add_space(6.0);
+            ui.label("会删除：");
+            for f in &plan.files {
+                ui.label(RichText::new(format!("• {}", f.display())).small());
+            }
+            if let Some(d) = &plan.remove_dir {
+                ui.label(RichText::new(format!("• 删空后的文件夹 {}", d.display())).small());
+            }
+            if plan.env_var {
+                let t = if cfg!(windows) {
+                    "• 环境变量 SUCARD_DIR"
+                } else {
+                    "• 环境变量 SUCARD_DIR 写在 shell 配置里，需要你自己删除"
+                };
+                ui.label(RichText::new(t).small());
+            }
+            ui.add_space(8.0);
+            ui.add_enabled_ui(plan.data_ok.is_ok(), |ui| {
+                clear_checkbox(ui, &mut delete_data, "同时删除我的数据（移到回收站，可以还原）");
+            });
+            ui.label(RichText::new(format!("数据目录：{}", plan.data_dir.display())).small().color(weak));
+            match &plan.data_ok {
+                Err(e) => {
+                    ui.label(RichText::new(e).small().color(weak));
+                }
+                Ok(()) if !delete_data => {
+                    ui.label(RichText::new("不勾选时数据保留，以后重新下载还能接着用").small().color(weak));
+                }
+                Ok(()) => {}
+            }
+            ui.separator();
+            ui.horizontal(|ui| {
+                let red = ui.visuals().error_fg_color;
+                if ui.button(RichText::new("卸载").color(red)).clicked() {
+                    go = true;
+                }
+                if ui.button("取消").on_hover_text("Esc").clicked() {
+                    cancel = true;
+                }
+            });
+        });
+        self.uninstall = Some(delete_data);
+        if cancel || modal.should_close() {
+            self.uninstall = None;
+            return;
+        }
+        if !go {
+            return;
+        }
+        self.uninstall = None;
+        #[cfg(test)]
+        {
+            self.uninstall_ran = Some(delete_data);
+        }
+        #[cfg(not(test))]
+        {
+            // 外观设置不要在退出前再写盘（数据目录可能已经移走了）
+            self.ui_dirty = false;
+            match uninstall::run(&plan, delete_data) {
+                Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                Err(e) => self.store.error = Some(e),
+            }
         }
     }
 
@@ -3006,6 +3098,7 @@ impl App {
         let before = self.store.prefs.ui.clone();
         let mut open = true;
         let mut make_guide = false;
+        let mut open_uninstall = false;
         egui::Window::new("UI设置")
             .open(&mut open)
             .resizable(false)
@@ -3095,8 +3188,20 @@ impl App {
                             .color(ui.visuals().weak_text_color()),
                     );
                 });
+                ui.separator();
+                let red = ui.visuals().error_fg_color;
+                if ui
+                    .button(RichText::new("卸载素签…").color(red))
+                    .on_hover_text("删除程序；可选把数据移到回收站。会先让你确认")
+                    .clicked()
+                {
+                    open_uninstall = true;
+                }
             });
         self.settings_open = open;
+        if open_uninstall {
+            self.uninstall = Some(false);
+        }
         if make_guide {
             if let Some(p) = self.store.install_guide() {
                 self.goto(Sel::File(p));
@@ -4523,6 +4628,41 @@ mod ui_tests {
         assert_eq!(default_root(env(&[("HOME", "/h")]), true), PathBuf::from("/h").join("Sucard"));
         assert_eq!(default_root(env(&[("USERPROFILE", ""), ("HOME", "/h")]), true), PathBuf::from("/h").join("Sucard"));
         assert_eq!(default_root(env(&[]), true), PathBuf::from(".").join("Sucard"));
+    }
+
+    #[test]
+    fn uninstall_dialog() {
+        let mut h = harness("uninstallui", "- [ ] 一条 ^aaa111\n");
+        h.state_mut().store.save_state();
+        h.run();
+        h.get_by_label("UI设置").simulate_click();
+        h.run();
+        // 取消：什么都不做
+        h.get_by_label("卸载素签…").simulate_click();
+        h.run();
+        assert!(h.query_by_label("卸载素签").is_some(), "没弹出卸载框");
+        assert!(h.query_by_label_contains("会删除").is_some());
+        assert!(h.query_by_label_contains("不勾选时数据保留").is_some(), "删除数据应默认不勾");
+        h.get_by_label("取消").simulate_click();
+        h.run();
+        assert!(h.query_by_label("卸载素签").is_none());
+        assert_eq!(h.state().uninstall_ran, None);
+
+        // 默认不删数据
+        h.get_by_label("卸载素签…").simulate_click();
+        h.run();
+        h.get_by_role_and_label(egui::accesskit::Role::Button, "卸载").simulate_click();
+        h.run();
+        assert_eq!(h.state().uninstall_ran, Some(false));
+
+        // 勾上「同时删除我的数据」
+        h.get_by_label("卸载素签…").simulate_click();
+        h.run();
+        h.get_by_label("同时删除我的数据（移到回收站，可以还原）").simulate_click();
+        h.run();
+        h.get_by_role_and_label(egui::accesskit::Role::Button, "卸载").simulate_click();
+        h.run();
+        assert_eq!(h.state().uninstall_ran, Some(true));
     }
 
     #[test]
