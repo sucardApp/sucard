@@ -11,18 +11,29 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use store::{find_marks, find_urls, is_block_id, marked_text, is_fixed_doc, parse_task, split_comments, strip_comments, tag_of_word, Item, Store, UiPrefs, FIXED_DOCS, INBOX};
 
+/// 默认数据目录的文件夹名（建在用户目录下）
+const DEFAULT_DIR: &str = "Sucard";
+
+/// 默认数据目录：用户目录下的 Sucard 文件夹。
+/// Windows 先看 USERPROFILE：Git、MSYS2 等工具会在自己的环境里设置 HOME，
+/// 如果先看 HOME，从那些窗口启动时素材库会建到别处。其他系统用 HOME。
+/// get 用来读环境变量（测试时传入假的）。
+fn default_root(get: impl Fn(&str) -> Option<std::ffi::OsString>, windows: bool) -> PathBuf {
+    let (first, second) = if windows { ("USERPROFILE", "HOME") } else { ("HOME", "USERPROFILE") };
+    get(first)
+        .filter(|v| !v.is_empty())
+        .or_else(|| get(second).filter(|v| !v.is_empty()))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(DEFAULT_DIR)
+}
+
 fn main() -> eframe::Result<()> {
     let root = std::env::args()
         .nth(1)
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("SUCARD_DIR").map(PathBuf::from))
-        .unwrap_or_else(|| {
-            let home = std::env::var_os("HOME")
-                .or_else(|| std::env::var_os("USERPROFILE"))
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("."));
-            home.join("素材库")
-        });
+        .unwrap_or_else(|| default_root(|k| std::env::var_os(k), cfg!(windows)));
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -4491,6 +4502,23 @@ mod ui_tests {
         h.get_by_label("浅色").simulate_click();
         h.run();
         assert!(warm(&h.ctx.style_of(egui::Theme::Light).visuals).is_none());
+    }
+
+    #[test]
+    fn default_root_location() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| std::ffi::OsString::from(v))
+        };
+        // Windows：优先 USERPROFILE，即使设置了 HOME（比如从 Git 的窗口启动）
+        let both = env(&[("USERPROFILE", r"C:\Users\amy"), ("HOME", r"D:\tools\home")]);
+        assert_eq!(default_root(&both, true), PathBuf::from(r"C:\Users\amy").join("Sucard"));
+        // 其他系统：用 HOME
+        let unix = env(&[("HOME", "/home/amy"), ("USERPROFILE", "/x")]);
+        assert_eq!(default_root(&unix, false), PathBuf::from("/home/amy").join("Sucard"));
+        // 缺一个就用另一个；空值当作没有；都没有就用当前目录
+        assert_eq!(default_root(env(&[("HOME", "/h")]), true), PathBuf::from("/h").join("Sucard"));
+        assert_eq!(default_root(env(&[("USERPROFILE", ""), ("HOME", "/h")]), true), PathBuf::from("/h").join("Sucard"));
+        assert_eq!(default_root(env(&[]), true), PathBuf::from(".").join("Sucard"));
     }
 
     #[test]
