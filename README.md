@@ -54,8 +54,8 @@ The UI is in Chinese.
 
 程序启动时按下面的顺序决定用哪个目录，用第一个有的：
 
-1. 命令行参数：`sucard D:/我的素材`
-2. 环境变量 `SUCARD_DIR`
+1. 命令行参数：`sucard D:\Sucard`
+2. 环境变量 `SUCARD_DIR`，比如设为 `D:\Sucard`
 3. 用户目录下的 `Sucard` 文件夹。用户目录的取法：
    - **Windows**：先看 `USERPROFILE`（就是 `C:\Users\你的用户名`），没有才看 `HOME`。
      不优先用 `HOME`，是因为 Git、MSYS2、Cygwin 等工具会在自己的窗口里改 `HOME`，
@@ -63,6 +63,12 @@ The UI is in Chinese.
    - **macOS / Linux**：用 `HOME`。
 
 想把素材放到别处（比如 D 盘或网盘同步文件夹），用第 1 或第 2 种方式指定即可。
+指定的路径就是素材库文件夹本身，程序直接使用，不会在后面再加一层 `Sucard`；文件夹名可以随意起，
+比如 `D:\Sucard`、`D:\我的素材`、`E:\网盘\工作素材` 都行，不存在会自动创建。
+`Sucard` 这个名字只在没有指定位置、程序自己在用户目录下建文件夹时用到。
+
+Windows 上最方便的固定方式是给 `sucard.exe` 建一个快捷方式，在快捷方式“属性 → 目标”的末尾加上路径，
+例如 `"C:\程序\sucard.exe" D:\Sucard`（路径里有空格时要加引号）。
 数据目录里的 `.sucard` 隐藏文件夹存放排序、界面设置和回收站；`.md` 文档就是普通文件，可以直接备份或同步。
 
 第一次使用某个数据目录时，会自动生成一份 `使用说明.md`：它本身就是示例文档，每条说明都是一条可以操作的素材。
@@ -74,7 +80,7 @@ The UI is in Chinese.
 
 ```bash
 cargo run --release              # 默认使用用户目录下的 Sucard 作为数据目录
-cargo run --release -- D:/我的素材 # 指定数据目录
+cargo run --release -- "D:\Sucard"  # 指定数据目录
 cargo test                       # 运行测试
 ```
 
