@@ -12,7 +12,7 @@ The UI is in Chinese.
 
 ## 下载
 
-到 [Releases](https://github.com/bestfullai/sucard/releases) 下载对应系统的压缩包，解压后直接运行 `sucard`（Windows 是 `sucard.exe`）。
+到 [Releases](https://github.com/sucardApp/sucard/releases) 下载对应系统的压缩包，解压后直接运行 `sucard`（Windows 是 `sucard.exe`）。
 
 默认数据目录是用户目录下的 `素材库` 文件夹，也可以在命令行指定：
 
