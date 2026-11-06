@@ -22,5 +22,9 @@ lto = true
 codegen-units = 1
 strip = true
 
+[build-dependencies]
+# Windows 版把图标嵌进 exe
+winresource = "0.1"
+
 [dev-dependencies]
 egui_kittest = "0.31"

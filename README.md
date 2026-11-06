@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/icon.svg" width="112" alt="素签 sucard 图标：三张叠放的卡片"></p>
+
 # 素签 sucard · 素材库兼待办
 
 **sucard** is a lightweight desktop app (Rust + egui) for collecting snippets and to-dos.
@@ -188,6 +190,8 @@ cargo test                       # 运行测试
 
 - `src/store.rs`：数据层，负责扫描文件、解析任务行、读写文件和排序（带单元测试，运行 `cargo test`）。
 - `src/main.rs`：界面，包括三栏布局、视图切换和拖放。
+- `build.rs`：编译 Windows 版时把 `assets/icon.ico` 嵌进 exe。
+- `assets/`：程序图标（`icon.svg`、`icon-256.png` 窗口图标、`icon.ico` exe 图标）和打包进程序的使用说明。
 
 ## 许可证
 

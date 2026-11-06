@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 100 100" role="img" aria-label="素签 sucard">
+<rect width="100" height="100" rx="23" fill="#E0F0E9"/>
+<g transform="translate(13.5 13.5) scale(0.73)">
+<rect x="34" y="10" width="52" height="62" rx="8" fill="#A9D3C2"/>
+<rect x="26" y="19" width="52" height="62" rx="8" fill="#4F8C76"/>
+<rect x="18" y="28" width="52" height="62" rx="8" fill="#133E34"/>
+<rect x="27" y="40" width="12" height="12" rx="3" fill="none" stroke="#E0F0E9" stroke-width="3.5"/>
+<path d="M45 46h16M27 64h34M27 77h24" fill="none" stroke="#E0F0E9" stroke-width="4" stroke-linecap="round"/>
+</g>
+</svg>

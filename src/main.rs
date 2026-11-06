@@ -39,6 +39,10 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1180.0, 740.0])
             .with_min_inner_size([760.0, 420.0])
+            // 窗口和任务栏图标（C 方案：叠卡）
+            .with_icon(std::sync::Arc::new(
+                eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon-256.png")).unwrap_or_default(),
+            ))
             .with_title("素签"),
         ..Default::default()
     };
