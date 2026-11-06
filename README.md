@@ -14,6 +14,32 @@ The UI is in Chinese.
 
 到 [Releases](https://github.com/sucardApp/sucard/releases) 下载对应系统的压缩包，解压后直接运行 `sucard`（Windows 是 `sucard.exe`）。
 
+| 系统 | 下载文件 |
+|---|---|
+| Windows（64 位） | `sucard-版本号-x86_64-pc-windows-msvc.zip` |
+| macOS（Apple 芯片：M1 / M2 / M3 / M4…） | `sucard-版本号-aarch64-apple-darwin.tar.gz` |
+| macOS（Intel 芯片） | `sucard-版本号-x86_64-apple-darwin.tar.gz` |
+| Linux（64 位） | `sucard-版本号-x86_64-unknown-linux-gnu.tar.gz` |
+
+### macOS 第一次打开
+
+程序没有做苹果的签名和公证，第一次打开时 macOS 会拦截，提示“无法验证开发者”或“Apple 无法检查其是否包含恶意软件”。
+确认是从本仓库 Releases 下载的之后，用下面任意一种方法放行（只需要做一次）：
+
+- **系统设置放行**：先双击 `sucard` 试着打开一次（会被拦截），然后打开“系统设置 → 隐私与安全性”，
+  在页面下方找到关于 `sucard` 的提示，点“仍要打开”，输入密码确认。
+- **右键打开**（macOS 14 及更早版本）：在访达里右键点 `sucard` →“打开”→ 在弹窗里再点“打开”。
+  macOS 15 起这个方法不再有效，请用上面的“系统设置放行”。
+- **终端命令**：在解压出来的文件夹里运行下面的命令，去掉下载标记后就能直接打开：
+
+  ```bash
+  xattr -dr com.apple.quarantine .
+  ./sucard
+  ```
+
+如果提示文件“已损坏，无法打开”，也是同一个原因，用上面的终端命令处理即可。
+`sucard` 是一个命令行程序文件（不是 `.app`），双击时会先打开一个终端窗口，再弹出程序窗口；使用时终端窗口不用管，退出程序后把它关掉即可。
+
 默认数据目录是用户目录下的 `素材库` 文件夹，也可以在命令行指定：
 
 ```bash
