@@ -462,6 +462,11 @@ struct App {
     rename_focus: bool,
     new_doc: String,
     settings_open: bool,
+    /// 中间栏「按标签显示」：面板展开着没有，选中的标签（多选，满足任一即显示）
+    mid_tags_open: bool,
+    mid_tags: Vec<String>,
+    /// 标签面板最近一次有操作（点开、点标签、鼠标停在上面）的时间，3 秒没操作自动收起
+    mid_tags_t: f64,
     /// 等待确认的删除操作
     confirm: Option<Confirm>,
     /// 卸载确认框开着；值是「同时删除数据」有没有勾
@@ -509,6 +514,9 @@ impl App {
             rename: None,
             rename_focus: false,
             settings_open: false,
+            mid_tags_open: false,
+            mid_tags: Vec::new(),
+            mid_tags_t: 0.0,
             confirm: None,
             uninstall: None,
             #[cfg(test)]
@@ -728,6 +736,11 @@ impl App {
             Sel::Untagged => it.tags().is_empty(),
             Sel::Trash => false,
         }
+    }
+
+    /// 中间栏「按标签显示」的多选筛选：没选就不筛，选了的满足任一即可（父标签包含子标签）
+    fn mid_tag_match(&self, it: &Item) -> bool {
+        self.mid_tags.is_empty() || self.mid_tags.iter().any(|t| it.has_tag(t))
     }
 
     fn apply(&mut self, acts: Vec<Act>) {
@@ -2465,13 +2478,13 @@ impl App {
             ui.add_space(4.0);
         });
 
-        // 左侧：文档 / 按标签
+        // 左侧：文档 / 标签
         // 左栏里点了哪里，画完再切换（画的过程中还借着 store 统计数量）
         let mut go: Option<Sel> = None;
         egui::SidePanel::left("left").resizable(true).default_width(210.0).show(ctx, |ui| {
             ui.add_space(6.0);
             let mut by_tag = self.store.prefs.left_by_tag;
-            if segmented(ui, &mut by_tag, "文档", "按标签") {
+            if segmented(ui, &mut by_tag, "文档", "标签") {
                 self.store.prefs.left_by_tag = by_tag;
                 self.store.save_state();
                 self.goto(Sel::All);
@@ -2910,6 +2923,7 @@ impl App {
             };
             // 改名的结果：Some(Some(新名字)) 保存，Some(None) 取消
             let mut rename_done: Option<Option<String>> = None;
+            let mut show_all = false;
             ui.horizontal(|ui| {
                 let renaming = match (&self.sel, &mut self.rename) {
                     (Sel::File(p), Some((rp, buf))) if p == rp => Some(buf),
@@ -2942,7 +2956,18 @@ impl App {
                     return;
                 }
 
-                ui.strong(&title);
+                // 「全部」可以点：不管当前选了什么、筛了什么，都回到全部卡片
+                let all_text = if self.sel == Sel::All { RichText::new("全部").strong() } else { RichText::new("全部 ›") };
+                if ui
+                    .add(egui::Button::new(all_text).frame(false))
+                    .on_hover_text("显示全部卡片（清除标签筛选和搜索）")
+                    .clicked()
+                {
+                    show_all = true;
+                }
+                if self.sel != Sel::All {
+                    ui.strong(&title);
+                }
                 if let Sel::File(p) = &self.sel {
                     if ui.small_button("阅读原文").on_hover_text("整篇只读查看，排版更清爽").clicked() {
                         self.reading = Some(RawRead::open(&self.store, p.clone()));
@@ -2961,7 +2986,66 @@ impl App {
                         self.rename_focus = true;
                     }
                 }
+                let n = self.mid_tags.len();
+                let label = if n == 0 { "按标签显示 ▼".to_string() } else { format!("按标签显示（{n}）▼") };
+                let b = ui
+                    .add(egui::Button::new(label).small().selected(self.mid_tags_open || n > 0))
+                    .on_hover_text("展开全部标签，点选筛选下面的卡片，可以选多个（满足任一即显示）；3 秒没操作自动收起");
+                if b.clicked() {
+                    self.mid_tags_open = !self.mid_tags_open;
+                }
+                if b.clicked() || b.hovered() {
+                    self.mid_tags_t = ui.input(|i| i.time);
+                }
             });
+            if show_all {
+                self.mid_tags.clear();
+                self.mid_tags_open = false;
+                self.search.clear();
+                self.goto(Sel::All);
+            }
+            // 选中的标签被删光了就去掉
+            let all_tags = self.store.all_tags();
+            self.mid_tags.retain(|t| all_tags.contains(t));
+            // 3 秒没操作就收起：画之前先判断，到点那一帧就不画了
+            let now = ui.input(|i| i.time);
+            if self.mid_tags_open && now - self.mid_tags_t >= 3.0 {
+                self.mid_tags_open = false;
+            }
+            if self.mid_tags_open {
+                ui.add_space(2.0);
+                let panel = ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+                    if all_tags.is_empty() {
+                        ui.label(RichText::new("还没有标签").small().color(ui.visuals().weak_text_color()));
+                    }
+                    for t in &all_tags {
+                        let on = self.mid_tags.contains(t);
+                        let (bg, fg) = tag_colors(t, ui.visuals().dark_mode);
+                        let accent = ui.visuals().selection.stroke.color;
+                        let b = egui::Button::new(RichText::new(format!("#{t}")).small().color(fg))
+                            .fill(if on { bg } else { bg.gamma_multiply(0.45) })
+                            .stroke(Stroke::new(if on { 1.5_f32 } else { 0.0 }, accent))
+                            .selected(on);
+                        if ui.add(b).clicked() {
+                            if on {
+                                self.mid_tags.retain(|x| x != t);
+                            } else {
+                                self.mid_tags.push(t.clone());
+                            }
+                        }
+                    }
+                    if !self.mid_tags.is_empty() && ui.small_button("清除").on_hover_text("取消全部选中的标签").clicked() {
+                        self.mid_tags.clear();
+                    }
+                });
+                // 鼠标停在面板上（包括点里面的标签）算有操作，重新计时；到点时唤醒一帧去收起
+                if panel.response.contains_pointer() {
+                    self.mid_tags_t = now;
+                }
+                let left = (self.mid_tags_t + 3.0 - now).max(0.0);
+                ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
+            }
             if let Some(result) = rename_done {
                 if let (Some(name), Some((old, _))) = (result, self.rename.take()) {
                     if let Some(new) = self.store.rename_doc(&old, &name) {
@@ -2980,7 +3064,9 @@ impl App {
 
             let ids: Vec<String> = ids
                 .into_iter()
-                .filter(|id| self.store.items.get(id).is_some_and(|it| self.visible(it) && self.sel_match(it)))
+                .filter(|id| {
+                    self.store.items.get(id).is_some_and(|it| self.visible(it) && self.sel_match(it) && self.mid_tag_match(it))
+                })
                 .collect();
             let drag_id = egui::DragAndDrop::payload::<DragItem>(ctx).map(|p| p.0.clone());
             let edit_id = self.editing.as_ref().filter(|e| e.2 == 0).map(|e| e.0.clone());
@@ -3873,11 +3959,65 @@ mod ui_tests {
     }
 
     #[test]
+    fn mid_tag_filter_multi_select() {
+        let mut h = harness("midtags", "- [ ] 甲 #资料/AI ^aaa111
+- [ ] 乙 #灵感 ^bbb222
+- [ ] 丙 ^ccc333
+");
+        h.run();
+        // 中间栏 + 右栏各一张
+        assert_eq!(h.query_all_by_label("丙").count(), 2);
+        assert!(h.query_by_label("#灵感").is_none(), "没点开时不列标签");
+        h.get_by_label("按标签显示 ▼").simulate_click();
+        h.run();
+        // 选一个：只剩带这个标签的（父标签包含子标签）
+        h.get_by_label("#资料").simulate_click();
+        h.run();
+        assert_eq!(h.query_all_by_label("甲").count(), 2);
+        assert_eq!(h.query_all_by_label("乙").count(), 1, "中间栏不该有乙");
+        assert_eq!(h.query_all_by_label("丙").count(), 1);
+        // 再选一个：满足任一即显示
+        h.get_by_label("#灵感").simulate_click();
+        h.run();
+        assert_eq!(h.query_all_by_label("乙").count(), 2);
+        assert_eq!(h.query_all_by_label("丙").count(), 1);
+        assert!(h.query_by_label("按标签显示（2）▼").is_some());
+        // 再点一次取消；清除全部
+        h.get_by_label("#灵感").simulate_click();
+        h.run();
+        assert_eq!(h.query_all_by_label("乙").count(), 1);
+        h.get_by_label("清除").simulate_click();
+        h.run();
+        assert_eq!(h.query_all_by_label("丙").count(), 2);
+
+        // 3 秒没操作自动收起（鼠标停在面板上不算没操作，先移开）
+        h.input_mut().events.push(egui::Event::PointerGone);
+        h.run();
+        h.state_mut().mid_tags_t -= 10.0;
+        h.run();
+        assert!(h.query_by_label("#灵感").is_none(), "3 秒没操作应该收起");
+
+        // 中间栏标题「全部」：不管选了文档、标签、搜索，点了都回到全部卡片
+        h.get_by_label("按标签显示 ▼").simulate_click();
+        h.run();
+        h.get_by_label("#灵感").simulate_click();
+        h.state_mut().search = "乙".into();
+        h.state_mut().sel = Sel::Untagged;
+        h.run();
+        h.get_by_label("全部 ›").simulate_click();
+        h.run();
+        assert!(h.state().sel == Sel::All && h.state().mid_tags.is_empty() && h.state().search.is_empty());
+        assert_eq!(h.query_all_by_label("甲").count(), 2);
+        assert_eq!(h.query_all_by_label("乙").count(), 2);
+        assert_eq!(h.query_all_by_label("丙").count(), 2);
+    }
+
+    #[test]
     fn right_todo_and_done_views() {
         let mut h = harness("rightdone", "- [ ] 一 #资料 ^aaa111\n- [x] 二 #资料 ^bbb222\n");
         h.run();
         assert!(h.query_by_label("TODO：").is_some());
-        assert_eq!(h.query_all_by_label("按标签").count(), 1, "只有左栏有「按标签」，右栏不该再有");
+        assert_eq!(h.query_all_by_label("标签").count(), 1, "只有左栏有「标签」，右栏不该再有");
         // 手动排序：只有没完成的（中间栏 + 右栏各一张）；已完成的只在中间栏
         assert_eq!(h.query_all_by_label("一").count(), 2);
         assert_eq!(h.query_all_by_label("二").count(), 1);

@@ -111,7 +111,7 @@ pub struct Prefs {
     pub right_done: bool,
     #[serde(default)]
     pub ui: UiPrefs,
-    /// 左栏「按标签」里折叠起来的父标签
+    /// 左栏「标签」里折叠起来的父标签
     #[serde(default)]
     pub collapsed_tags: Vec<String>,
     /// 标签面板（快速添加「# 标签」、卡片「编辑标签…」）里折叠起来的父标签，和左栏的分开记
