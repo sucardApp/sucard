@@ -2372,9 +2372,10 @@ impl App {
         egui::TopBottomPanel::top("top").show(ctx, |ui| {
             ui.add_space(6.0);
             let target = self.target_file();
-            // 左侧选中了某个标签时，新条目自动带上它
+            // 左侧选中了某个标签时，新条目自动带上它——但自己写了标签就只用自己写的，
+            // 不然两边的标签会叠在一起
             let auto_tag = match &self.sel {
-                Sel::Tag(t) => Some(t.clone()),
+                Sel::Tag(t) if store::parse_tags(&self.quick).is_empty() => Some(t.clone()),
                 _ => None,
             };
             ui.horizontal(|ui| {
@@ -2406,7 +2407,7 @@ impl App {
                 if resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                     if !self.quick.trim().is_empty() {
                         let mut text = std::mem::take(&mut self.quick);
-                        if let Some(t) = &auto_tag {
+                        if let Some(t) = auto_tag.as_ref().filter(|_| store::parse_tags(&text).is_empty()) {
                             text = store::ensure_tag(&text, t);
                         }
                         self.store.add(&text, &target);
@@ -4022,6 +4023,31 @@ mod ui_tests {
         assert_eq!(h.state().quick, "");
         assert!(h.ctx.memory(|m| m.has_focus(Id::new("quick_add"))), "清空后光标应留在输入框");
         assert!(h.state().store.items.is_empty(), "清空不该保存任何内容");
+    }
+
+    #[test]
+    fn quick_add_sidebar_tag_only_when_no_own_tags() {
+        let mut h = harness("quickauto", "- [ ] 一 #灵感 ^aaa111
+");
+        h.state_mut().sel = Sel::Tag("灵感".into());
+        h.run();
+        let quick = Id::new("quick_add");
+        // 自己写了标签：不再带上左侧选中的
+        h.state_mut().quick = "写脚本 #资料".into();
+        h.ctx.memory_mut(|m| m.request_focus(quick));
+        h.run();
+        h.press_key(Key::Enter);
+        h.run();
+        let last = h.state().store.items.values().find(|i| i.text.contains("写脚本")).expect("没保存").text.clone();
+        assert!(last.contains("#资料") && !last.contains("#灵感"), "{last}");
+        // 没写标签：照旧带上
+        h.state_mut().quick = "再写一条".into();
+        h.ctx.memory_mut(|m| m.request_focus(quick));
+        h.run();
+        h.press_key(Key::Enter);
+        h.run();
+        let last = h.state().store.items.values().find(|i| i.text.contains("再写一条")).expect("没保存").text.clone();
+        assert!(last.contains("#灵感"), "{last}");
     }
 
     #[test]
