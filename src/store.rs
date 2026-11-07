@@ -1146,8 +1146,11 @@ impl Store {
 
     // ---------- TODO（右栏）----------
 
-    /// 这个文档的条目是否出现在右栏 TODO 里（保管箱固定不放入）
+    /// 这个文档的条目是否出现在右栏 TODO 里（收件箱固定放入，保管箱固定不放入）
     pub fn in_todo(&self, rel: &Path) -> bool {
+        if rel == Path::new(INBOX) {
+            return true;
+        }
         if rel == Path::new(VAULT) {
             return false;
         }
@@ -1155,9 +1158,9 @@ impl Store {
         !self.prefs.not_in_todo.contains(&key)
     }
 
-    /// 设置文档是否放入 TODO，并保存（保管箱固定不放入，不能改）
+    /// 设置文档是否放入 TODO，并保存（固定文档写死，不能改）
     pub fn set_in_todo(&mut self, rel: &Path, on: bool) {
-        if rel == Path::new(VAULT) {
+        if is_fixed_doc(rel) {
             return;
         }
         let key = rel.to_string_lossy().replace('\\', "/");
@@ -1684,11 +1687,18 @@ mod tests {
         assert!(!s.in_todo(&b) && s.in_todo(&a));
         s.set_in_todo(&b, true);
         assert!(s.in_todo(&b) && s.prefs.not_in_todo.is_empty());
-        // 保管箱固定不放入，改不了
+        // 收件箱固定放入、保管箱固定不放入，都改不了
         let v = PathBuf::from(VAULT);
         assert!(!s.in_todo(&v));
         s.set_in_todo(&v, true);
         assert!(!s.in_todo(&v) && s.prefs.not_in_todo.is_empty());
+        let i = PathBuf::from(INBOX);
+        assert!(s.in_todo(&i));
+        s.set_in_todo(&i, false);
+        assert!(s.in_todo(&i) && s.prefs.not_in_todo.is_empty());
+        // 旧设置里记了收件箱不放入，也不生效
+        s.prefs.not_in_todo.push(INBOX.to_string());
+        assert!(s.in_todo(&i));
         let _ = std::fs::remove_dir_all(&root);
     }
 

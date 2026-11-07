@@ -10,7 +10,7 @@ use eframe::egui::{
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use store::{find_marks, find_urls, is_block_id, marked_text, is_fixed_doc, parse_task, split_comments, strip_comments, tag_of_word, Item, Store, UiPrefs, FIXED_DOCS, INBOX, VAULT};
+use store::{find_marks, find_urls, is_block_id, marked_text, is_fixed_doc, parse_task, split_comments, strip_comments, tag_of_word, Item, Store, UiPrefs, FIXED_DOCS, INBOX};
 
 /// 默认数据目录的文件夹名（建在用户目录下）
 const DEFAULT_DIR: &str = "Sucard";
@@ -601,18 +601,18 @@ impl App {
         }
     }
 
-    /// 左栏的一个文档块：点击选中，拖卡片进来 = 移入，右键删除（固定文档不能删）
+    /// 左栏的一个文档块：点击选中，拖卡片进来 = 移入，右键菜单（固定文档没有）
     fn file_block(&mut self, ui: &mut Ui, path: &Path, indent: f32, label: String, acts: &mut Vec<Act>) {
         let n = self.store.items.values().filter(|it| !it.done && it.file == path).count();
         let selected = matches!(&self.sel, Sel::File(p) if p == path);
         let in_todo = self.store.in_todo(path);
         let text = if in_todo { RichText::new(label) } else { RichText::new(label).color(ui.visuals().weak_text_color()) };
         let resp = nav_block(ui, ("nav_file", path), selected, indent, text, n);
-        // 保管箱：固定不放入 TODO，没有右键菜单
-        let vault = path == Path::new(VAULT);
+        // 固定文档（收件箱、保管箱）：是否放入 TODO 写死，没有右键菜单
+        let fixed = is_fixed_doc(path);
         let resp = if in_todo {
             resp
-        } else if vault {
+        } else if fixed {
             resp.on_hover_text("保管箱：长期保存，条目不在右栏 TODO 显示")
         } else {
             resp.on_hover_text("不放入TODO：条目不在右栏显示（右键可改）")
@@ -626,10 +626,9 @@ impl App {
         if let Some(p) = resp.dnd_release_payload::<DragItem>() {
             acts.push(Act::MoveTo(p.0.clone(), path.to_path_buf()));
         }
-        if vault {
+        if fixed {
             return;
         }
-        let fixed = is_fixed_doc(path);
         let mut in_todo = self.store.in_todo(path);
         let mut todo_changed = false;
         resp.context_menu(|ui| {
@@ -650,10 +649,7 @@ impl App {
                 ui.close_menu();
             }
             ui.separator();
-            let r = ui.add_enabled(!fixed, egui::Button::new("删除文档…"));
-            if fixed {
-                r.on_disabled_hover_text("固定文档，不能删除");
-            } else if r.on_hover_text("移到回收站，可以还原").clicked() {
+            if ui.button("删除文档…").on_hover_text("移到回收站，可以还原").clicked() {
                 self.confirm = Some(Confirm::Doc(path.to_path_buf()));
                 ui.close_menu();
             }
@@ -4856,10 +4852,15 @@ mod ui_tests {
         assert!(h.query_by_label("修改标题").is_none());
         assert!(h.query_by_label("编辑原文").is_some());
 
-        // 右键：「删除文档…」是灰的，点了也没反应
-        right_click_card(&mut h, "📥 收件箱");
-        h.get_by_label("删除文档…").simulate_click();
-        h.run();
+        // 右键：固定文档没有右键菜单
+        for label in ["📥 收件箱", "🔒 保管箱"] {
+            right_click_card(&mut h, label);
+            assert!(h.query_by_label("删除文档…").is_none(), "{label} 不该有右键菜单");
+            assert!(h.query_by_label("不放入TODO").is_none());
+        }
+        // 普通文档还有
+        right_click_card(&mut h, "📄 b.md");
+        assert!(h.query_by_label("删除文档…").is_some());
         assert!(h.state().confirm.is_none());
         assert!(h.state().store.root.join(INBOX).is_file());
     }
