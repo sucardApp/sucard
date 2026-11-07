@@ -432,6 +432,8 @@ enum Act {
     CommitEdit,
     Select(String, u8),
     ToggleTag(String, String),
+    /// 标签面板里折叠 / 展开父标签
+    FoldPanelTag(String),
 }
 
 struct App {
@@ -667,6 +669,7 @@ impl App {
                     self.quick = store::strip_tags(&self.quick);
                     self.quick_focus = true;
                 }
+                Some(TagOp::Fold(t)) => self.store.toggle_panel_fold(&t),
                 None => {}
             }
         });
@@ -750,6 +753,7 @@ impl App {
                     }
                 }
                 Act::ToggleTag(id, t) => self.store.toggle_item_tag(&id, &t),
+                Act::FoldPanelTag(t) => self.store.toggle_panel_fold(&t),
                 Act::Delete(id) => {
                     if self.editing.as_ref().is_some_and(|(e, _, _)| *e == id) {
                         self.editing = None;
@@ -1313,6 +1317,8 @@ enum TagOp {
     Add(String),
     /// 清除全部标签
     Clear,
+    /// 折叠 / 展开父标签（只影响标签面板）
+    Fold(String),
 }
 
 /// 标签面板：顶部新建标签，中间是全部标签（已有的高亮、父标签提示「已有子标签」），
@@ -1330,7 +1336,7 @@ fn tag_panel(ui: &mut Ui, have: &[String], store: &Store, key: Id) -> Option<Tag
             ui.add(
                 TextEdit::singleline(&mut buf)
                     .margin(input_margin())
-                    .hint_text("新标签，回车添加")
+                    .hint_text("筛选，或回车新建")
                     .desired_width(180.0),
             )
         })
@@ -1345,16 +1351,33 @@ fn tag_panel(ui: &mut Ui, have: &[String], store: &Store, key: Id) -> Option<Tag
         buf.clear();
         r.request_focus();
     }
+    // 输入框有字时按它筛选：列出名字里含这些字的标签（不管折叠），显示完整路径
+    let filter: String = buf.trim().trim_start_matches('#').to_lowercase();
     ui.data_mut(|d| d.insert_temp(key, buf));
 
-    let tags = store.all_tags();
-    if !tags.is_empty() {
+    let all = store.all_tags();
+    let folded = &store.prefs.panel_collapsed_tags;
+    let tags: Vec<&String> = if filter.is_empty() {
+        all.iter().filter(|t| !folded.iter().any(|c| t.starts_with(&format!("{c}/")))).collect()
+    } else {
+        all.iter().filter(|t| t.to_lowercase().contains(&filter)).collect()
+    };
+    if !all.is_empty() {
         ui.separator();
+    }
+    if tags.is_empty() && !filter.is_empty() {
+        ui.label(RichText::new("没有匹配的标签，回车新建").small().color(ui.visuals().weak_text_color()));
     }
     ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
         for t in tags {
-            let depth = t.matches('/').count();
-            let short = t.rsplit('/').next().unwrap_or(&t);
+            let t = t.clone();
+            let (depth, short) = if filter.is_empty() {
+                (t.matches('/').count(), t.rsplit('/').next().unwrap_or(&t))
+            } else {
+                (0, t.as_str())
+            };
+            let has_children = filter.is_empty() && all.iter().any(|x| x.starts_with(&format!("{t}/")));
+            let collapsed = folded.contains(&t);
             let on = have.contains(&t);
             // 本身没有、但有它的子标签：#资料/AI 之于 资料
             let child = format!("{t}/");
@@ -1378,13 +1401,31 @@ fn tag_panel(ui: &mut Ui, have: &[String], store: &Store, key: Id) -> Option<Tag
                 format!("#{t}
 点击加上")
             };
-            let clicked = ui
+            let (clicked, fold) = ui
                 .horizontal(|ui| {
                     ui.add_space(depth as f32 * 14.0);
-                    ui.selectable_label(on, text).on_hover_text(hover).clicked()
+                    // 折叠箭头（没有子标签的也留出位置，文字对齐；筛选时不显示）
+                    let mut fold = false;
+                    if filter.is_empty() {
+                        let h = ui.spacing().interact_size.y;
+                        let (rect, ar) = ui.allocate_exact_size(egui::vec2(FOLD_W, h), Sense::click());
+                        if has_children {
+                            let ar = ar.on_hover_text(if collapsed { "展开子标签" } else { "折叠子标签" });
+                            let color = if ar.hovered() {
+                                ui.visuals().strong_text_color()
+                            } else {
+                                ui.visuals().weak_text_color()
+                            };
+                            fold_arrow(ui.painter(), rect.center(), collapsed, color);
+                            fold = ar.clicked();
+                        }
+                    }
+                    (ui.selectable_label(on, text).on_hover_text(hover).clicked(), fold)
                 })
                 .inner;
-            if clicked {
+            if fold {
+                op = Some(TagOp::Fold(t));
+            } else if clicked {
                 op = Some(TagOp::Toggle(t));
             }
         }
@@ -1407,6 +1448,7 @@ fn tag_menu(ui: &mut Ui, it: &Item, store: &Store, acts: &mut Vec<Act>) {
         Some(TagOp::Toggle(t)) => acts.push(Act::ToggleTag(it.id.clone(), t)),
         Some(TagOp::Add(t)) => acts.push(Act::AddTag(it.id.clone(), t, false)),
         Some(TagOp::Clear) => acts.push(Act::SetPrimary(it.id.clone(), None)),
+        Some(TagOp::Fold(t)) => acts.push(Act::FoldPanelTag(t)),
         None => {}
     }
 }

@@ -15,6 +15,8 @@ pub const VAULT: &str = "保管箱.md";
 /// 自带的使用说明（第一次使用时生成，也可以在 UI设置 里重新生成）
 pub const GUIDE: &str = "使用说明.md";
 const GUIDE_TEXT: &str = include_str!("../assets/使用说明.md");
+/// 使用说明里所有标签的根标签；生成使用说明时在左栏和标签面板里都默认折叠
+const GUIDE_TAG: &str = "说明";
 /// 固定文档：总是存在，不能删除、不能改名（缺了启动时自动建）
 pub const FIXED_DOCS: [&str; 2] = [INBOX, VAULT];
 
@@ -112,6 +114,9 @@ pub struct Prefs {
     /// 左栏「按标签」里折叠起来的父标签
     #[serde(default)]
     pub collapsed_tags: Vec<String>,
+    /// 标签面板（快速添加「# 标签」、卡片「编辑标签…」）里折叠起来的父标签，和左栏的分开记
+    #[serde(default)]
+    pub panel_collapsed_tags: Vec<String>,
     /// 不放入 TODO（右栏不显示）的文档，存相对路径
     #[serde(default)]
     pub not_in_todo: Vec<String>,
@@ -1003,6 +1008,13 @@ impl Store {
         }
         // 重新读取：条目补上 ^id、进入列表
         self.reload();
+        // 使用说明的标签默认折叠，不占地方
+        for c in [&mut self.prefs.collapsed_tags, &mut self.prefs.panel_collapsed_tags] {
+            if !c.iter().any(|t| t == GUIDE_TAG) {
+                c.push(GUIDE_TAG.to_string());
+            }
+        }
+        self.save_state();
         Some(rel)
     }
 
@@ -1214,6 +1226,17 @@ impl Store {
             Ok(()) => self.reload(),
             Err(e) => self.error = Some(format!("保存 {} 失败：{e}", rel.display())),
         }
+    }
+
+    /// 标签面板里折叠 / 展开一个父标签（不影响左栏）
+    pub fn toggle_panel_fold(&mut self, tag: &str) {
+        let c = &mut self.prefs.panel_collapsed_tags;
+        if let Some(i) = c.iter().position(|x| x == tag) {
+            c.remove(i);
+        } else {
+            c.push(tag.to_string());
+        }
+        self.save_state();
     }
 
     /// 所有标签（含父级），按名称排序
