@@ -354,6 +354,8 @@ enum Confirm {
     Item(String),
     /// 删除文档（移到回收站）
     Doc(PathBuf),
+    /// 把文档转成卡片（原文件先备份到回收站）
+    ConvertDoc(PathBuf),
     /// 彻底删除回收站里的文档（不可恢复）
     Purge(Vec<String>),
     /// 原文改了没保存就要离开；Some = 离开后要切换到的位置，None = 只是返回
@@ -436,6 +438,8 @@ enum Act {
     FoldPanelTag(String),
     /// 打开「完整阅读」弹窗
     OpenCard(String),
+    /// 把文档转成卡片（确认后）
+    ConvertDoc(PathBuf),
 }
 
 struct App {
@@ -618,6 +622,14 @@ impl App {
                 todo_changed = true;
                 ui.close_menu();
             }
+            let plain = self.store.doc_plain_lines(path);
+            let r = ui.add_enabled(plain > 0, egui::Button::new("转成卡片…"));
+            if plain == 0 {
+                r.on_disabled_hover_text("没有可以转换的文字（全部已经是卡片）");
+            } else if r.on_hover_text("把不是卡片的文字合成一张卡片；原文件先备份到回收站").clicked() {
+                self.confirm = Some(Confirm::ConvertDoc(path.to_path_buf()));
+                ui.close_menu();
+            }
             ui.separator();
             let r = ui.add_enabled(!fixed, egui::Button::new("删除文档…"));
             if fixed {
@@ -761,6 +773,16 @@ impl App {
                 Act::ToggleTag(id, t) => self.store.toggle_item_tag(&id, &t),
                 Act::FoldPanelTag(t) => self.store.toggle_panel_fold(&t),
                 Act::OpenCard(id) => self.card_view = Some(id),
+                Act::ConvertDoc(p) => {
+                    if self.store.convert_doc_to_card(&p) {
+                        // 文档重新读取了：编辑、阅读中的状态作废，选中这个文档看结果
+                        self.editing = None;
+                        self.selected = None;
+                        self.raw = None;
+                        self.reading = None;
+                        self.sel = Sel::File(p);
+                    }
+                }
                 Act::Delete(id) => {
                     if self.editing.as_ref().is_some_and(|(e, _, _)| *e == id) {
                         self.editing = None;
@@ -3159,6 +3181,23 @@ impl App {
                     "可以在回收站里还原。".to_string(),
                     "删除",
                     Act::DeleteDoc(p.clone()),
+                )
+            }
+            Confirm::ConvertDoc(p) => {
+                let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                let n = self.store.doc_plain_lines(p);
+                let kept = self.store.doc_item_count(p);
+                let body = if kept > 0 {
+                    format!("{n} 行文字会合成一张卡片放在最前面，已有的 {kept} 条卡片不变。")
+                } else {
+                    format!("{n} 行文字会合成一张卡片。")
+                };
+                (
+                    format!("把「{name}」转成卡片？"),
+                    body,
+                    "标题改成【】，空行去掉。原文件先备份到回收站，可以还原。".to_string(),
+                    "转成卡片",
+                    Act::ConvertDoc(p.clone()),
                 )
             }
             Confirm::LeaveRaw(_) => return,

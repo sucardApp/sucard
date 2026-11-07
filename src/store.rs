@@ -203,6 +203,46 @@ pub struct Store {
 
 // ---------- 解析工具 ----------
 
+/// 「转成卡片」：文档里的普通文字合成一张卡片的原文。第一行（标题去掉 #）做首行，其余缩进成续行；
+/// 其余标题改成【】（代码块里的 # 不算标题），空行去掉（空行会结束一条），行尾的 ^编号 去掉
+/// （转成卡片后会重新编号）。没有文字时返回 None
+fn plain_to_card(lines: &[&str]) -> Option<String> {
+    let mut out = String::new();
+    let mut in_code = false;
+    for raw in lines {
+        let mut l = raw.trim_end();
+        if let Some((head, last)) = l.rsplit_once(' ') {
+            if is_block_id(last) {
+                l = head.trim_end();
+            }
+        }
+        if l.trim().is_empty() || is_block_id(l.trim()) {
+            continue;
+        }
+        let fence = l.trim_start().starts_with("```");
+        let heading = (!in_code && !fence)
+            .then(|| {
+                let hashes = l.len() - l.trim_start_matches('#').len();
+                (1..=6).contains(&hashes).then(|| l[hashes..].strip_prefix(' ')).flatten()
+            })
+            .flatten()
+            .map(str::trim);
+        if fence {
+            in_code = !in_code;
+        }
+        if out.is_empty() {
+            out = format!("- [ ] {}", heading.unwrap_or(l.trim()));
+        } else {
+            out.push_str("\n  ");
+            match heading {
+                Some(h) => out.push_str(&format!("【{h}】")),
+                None => out.push_str(l),
+            }
+        }
+    }
+    (!out.is_empty()).then_some(out)
+}
+
 /// 把使用说明合成一张卡片：第一行是标题和 #使用说明 标签，其余内容都缩进成这张卡片的续行。
 /// 去掉原来每条的标签；任务行改成「• 」（否则会变成单独的卡片）；标题改成【】；
 /// 空行会结束一条，所以去掉。
@@ -1194,6 +1234,69 @@ impl Store {
             },
         );
         self.save_trash();
+        true
+    }
+
+    /// 文档里不是卡片的文字有几行（空行不算）。「转成卡片」据此判断有没有东西可转
+    pub fn doc_plain_lines(&self, rel: &Path) -> usize {
+        self.doc_index(rel).map_or(0, |i| {
+            self.docs[i].lines.iter().filter(|l| matches!(l, Line::Raw(s) if !s.trim().is_empty())).count()
+        })
+    }
+
+    /// 「转成卡片」：把文档里不是卡片的文字合成一张卡片放在最前面，已有的卡片原样留在后面。
+    /// 改写前先把原文件复制一份放进回收站（可以还原，原位置有文件时还原成「名字（恢复）」）。
+    /// 成功返回 true
+    pub fn convert_doc_to_card(&mut self, rel: &Path) -> bool {
+        let Some(i) = self.doc_index(rel) else { return false };
+        let mut plain: Vec<&str> = Vec::new();
+        let mut cards: Vec<String> = Vec::new();
+        for l in &self.docs[i].lines {
+            match l {
+                Line::Raw(s) => plain.push(s),
+                Line::Item(id) => {
+                    if let Some(it) = self.items.get(id) {
+                        cards.push(it.to_line());
+                    }
+                }
+            }
+        }
+        let Some(card) = plain_to_card(&plain) else { return false };
+        let mut out = card;
+        for c in cards {
+            out.push('\n');
+            out.push_str(&c);
+        }
+        out.push('\n');
+
+        // 原文件先备份进回收站
+        let src = self.root.join(rel);
+        let dir = self.trash_dir();
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+        let name = rel.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let mut file = format!("{}_{name}", now.as_millis());
+        let mut n = 1;
+        while dir.join(&file).exists() {
+            file = format!("{}_{n}_{name}", now.as_millis());
+            n += 1;
+        }
+        if let Err(e) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::copy(&src, dir.join(&file))) {
+            self.error = Some(format!("备份 {} 失败，没有转换：{e}", rel.display()));
+            return false;
+        }
+        let items = self.doc_item_count(rel);
+        self.trash.insert(
+            0,
+            TrashEntry { file, original: rel.to_string_lossy().replace('\\', "/"), deleted_at: now.as_secs(), items },
+        );
+        self.save_trash();
+
+        if let Err(e) = write_atomic(&src, &out) {
+            self.error = Some(format!("转换 {} 失败：{e}", rel.display()));
+            return false;
+        }
+        // 重新读取：新卡片补上 ^id
+        self.reload();
         true
     }
 
