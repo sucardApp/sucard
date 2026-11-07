@@ -705,7 +705,8 @@ impl App {
     fn handle_keys(&mut self, ctx: &egui::Context, acts: &mut Vec<Act>) {
         // 删除确认框、卸载框开着：回车、Esc 归确认框
         // 「完整阅读」弹窗开着时也不处理（空格、Delete 不作用到卡片）
-        if self.confirm.is_some() || self.uninstall.is_some() || self.card_view.is_some() {
+        // 「按标签显示」弹窗开着时也不处理（Esc 留给弹窗关掉自己）
+        if self.confirm.is_some() || self.uninstall.is_some() || self.card_view.is_some() || self.mid_tags_open {
             return;
         }
         let Some((id, place)) = self.selected.clone() else { return };
@@ -741,6 +742,39 @@ impl App {
     /// 中间栏「按标签显示」的多选筛选：没选就不筛，选了的满足任一即可（父标签包含子标签）
     fn mid_tag_match(&self, it: &Item) -> bool {
         self.mid_tags.is_empty() || self.mid_tags.iter().any(|t| it.has_tag(t))
+    }
+
+    /// 「按标签显示」弹窗里的标签：点一下选中，再点取消
+    fn mid_tags_list(&mut self, ui: &mut Ui, all_tags: &[String]) {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+            if all_tags.is_empty() {
+                ui.label(RichText::new("还没有标签").color(ui.visuals().weak_text_color()));
+            }
+            let accent = ui.visuals().selection.stroke.color;
+            // 选中的：圆角框 + 浅的强调色底
+            // 弹窗底色往强调色调一半：不透明，深浅主题下都看得出来又不抢字
+            let on_fill = ui.visuals().window_fill.lerp_to_gamma(ui.visuals().selection.bg_fill, 0.25);
+            // 标签框大一点：左右、上下都多留些边
+            ui.spacing_mut().button_padding = egui::vec2(9.0, 4.0);
+            let r = uip(ui).radius.max(4.0);
+            for t in all_tags {
+                let on = self.mid_tags.contains(t);
+                let (bg, fg) = tag_colors(t, ui.visuals().dark_mode);
+                let b = egui::Button::new(RichText::new(format!("#{t}")).color(fg))
+                    .fill(if on { on_fill } else { bg.gamma_multiply(0.45) })
+                    .stroke(Stroke::new(if on { 1.5_f32 } else { 0.0 }, accent))
+                    .corner_radius(r)
+                    .selected(on);
+                if ui.add(b).clicked() {
+                    if on {
+                        self.mid_tags.retain(|x| x != t);
+                    } else {
+                        self.mid_tags.push(t.clone());
+                    }
+                }
+            }
+        });
     }
 
     fn apply(&mut self, acts: Vec<Act>) {
@@ -1977,7 +2011,8 @@ fn read_button(ui: &mut Ui, rect: Rect, id: Id) -> egui::Response {
     // 线宽取整数个实际像素；奇数宽对齐到像素中心、偶数宽对齐到像素边界，不发虚
     let lw = (1.3 * ppp).round().max(1.0);
     let st = Stroke::new(lw / ppp, color);
-    let tr = if lw as i32 % 2 == 1 { p.round_pos_to_pixel_center(r.right_top()) } else { p.round_pos_to_pixels(r.right_top()) };
+    use egui::emath::GuiRounding as _;
+    let tr = if lw as i32 % 2 == 1 { r.right_top().round_to_pixel_center(ppp) } else { r.right_top().round_to_pixels(ppp) };
     let bl = tr + egui::vec2(-w, w);
     // 箭头两条边和斜杆的夹角（两边加起来就是张开的角度；直角是 45°）
     let half = 36_f32.to_radians();
@@ -2350,6 +2385,20 @@ fn segmented(ui: &mut Ui, second: &mut bool, a: &str, b: &str) -> bool {
     let mut changed = false;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
+        for (i, label) in [a, b].into_iter().enumerate() {
+            let on = (i == 1) == *second;
+            if seg_button(ui, label, on).clicked() && !on {
+                *second = i == 1;
+                changed = true;
+            }
+        }
+    });
+    changed
+}
+
+/// 和左栏「文档 / 标签」一样的带框按钮：同样的字号、内边距、圆角、边框；选中时填底色、边框变强调色
+fn seg_button(ui: &mut Ui, label: impl Into<egui::WidgetText>, on: bool) -> egui::Response {
+    ui.scope(|ui| {
         ui.spacing_mut().button_padding = egui::vec2(10.0, 3.0);
         let r = uip(ui).radius.max(4.0);
         let edge = if let Some(c) = warm(ui.visuals()) {
@@ -2360,18 +2409,11 @@ fn segmented(ui: &mut Ui, second: &mut bool, a: &str, b: &str) -> bool {
             Color32::from_gray(175)
         };
         let accent = ui.visuals().selection.stroke.color;
-        for (i, label) in [a, b].into_iter().enumerate() {
-            let on = (i == 1) == *second;
-            let stroke = Stroke::new(1.0_f32, if on { accent } else { edge });
-            let fill = if on { ui.visuals().selection.bg_fill } else { Color32::TRANSPARENT };
-            let resp = ui.add(egui::Button::new(label).fill(fill).stroke(stroke).corner_radius(r));
-            if resp.clicked() && !on {
-                *second = i == 1;
-                changed = true;
-            }
-        }
-    });
-    changed
+        let stroke = Stroke::new(1.0_f32, if on { accent } else { edge });
+        let fill = if on { ui.visuals().selection.bg_fill } else { Color32::TRANSPARENT };
+        ui.add(egui::Button::new(label).fill(fill).stroke(stroke).corner_radius(r))
+    })
+    .inner
 }
 
 // ---------- 主界面 ----------
@@ -2937,6 +2979,8 @@ impl App {
             // 改名的结果：Some(Some(新名字)) 保存，Some(None) 取消
             let mut rename_done: Option<Option<String>> = None;
             let mut show_all = false;
+            // 「按标签显示」按钮的位置，弹窗从它下面弹出
+            let mut tag_btn: Option<Rect> = None;
             ui.horizontal(|ui| {
                 let renaming = match (&self.sel, &mut self.rename) {
                     (Sel::File(p), Some((rp, buf))) if p == rp => Some(buf),
@@ -2970,9 +3014,8 @@ impl App {
                 }
 
                 // 「全部」可以点：不管当前选了什么、筛了什么，都回到全部卡片
-                let all_text = if self.sel == Sel::All { RichText::new("全部").strong() } else { RichText::new("全部 ›") };
-                if ui
-                    .add(egui::Button::new(all_text).frame(false))
+                let all_text = if self.sel == Sel::All { "全部" } else { "全部 ›" };
+                if seg_button(ui, all_text, self.sel == Sel::All)
                     .on_hover_text("显示全部卡片（清除标签筛选和搜索）")
                     .clicked()
                 {
@@ -3001,15 +3044,17 @@ impl App {
                 }
                 let n = self.mid_tags.len();
                 let label = if n == 0 { "按标签显示 ▼".to_string() } else { format!("按标签显示（{n}）▼") };
-                let b = ui
-                    .add(egui::Button::new(label).small().selected(self.mid_tags_open || n > 0))
-                    .on_hover_text("展开全部标签，点选筛选下面的卡片，可以选多个（满足任一即显示）；3 秒没操作自动收起");
+                // 和「全部」拉开一点距离
+                ui.add_space(12.0);
+                let b = seg_button(ui, label, self.mid_tags_open || n > 0)
+                    .on_hover_text("弹出全部标签，点选筛选下面的卡片，可以选多个（满足任一即显示）；3 秒没操作自动收起");
                 if b.clicked() {
                     self.mid_tags_open = !self.mid_tags_open;
                 }
                 if b.clicked() || b.hovered() {
                     self.mid_tags_t = ui.input(|i| i.time);
                 }
+                tag_btn = Some(b.rect);
             });
             if show_all {
                 self.mid_tags.clear();
@@ -3025,39 +3070,54 @@ impl App {
             if self.mid_tags_open && now - self.mid_tags_t >= 3.0 {
                 self.mid_tags_open = false;
             }
-            if self.mid_tags_open {
-                ui.add_space(2.0);
-                let panel = ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
-                    if all_tags.is_empty() {
-                        ui.label(RichText::new("还没有标签").small().color(ui.visuals().weak_text_color()));
-                    }
-                    for t in &all_tags {
-                        let on = self.mid_tags.contains(t);
-                        let (bg, fg) = tag_colors(t, ui.visuals().dark_mode);
-                        let accent = ui.visuals().selection.stroke.color;
-                        let b = egui::Button::new(RichText::new(format!("#{t}")).small().color(fg))
-                            .fill(if on { bg } else { bg.gamma_multiply(0.45) })
-                            .stroke(Stroke::new(if on { 1.5_f32 } else { 0.0 }, accent))
-                            .selected(on);
-                        if ui.add(b).clicked() {
-                            if on {
-                                self.mid_tags.retain(|x| x != t);
-                            } else {
-                                self.mid_tags.push(t.clone());
-                            }
-                        }
-                    }
-                    if !self.mid_tags.is_empty() && ui.small_button("清除").on_hover_text("取消全部选中的标签").clicked() {
-                        self.mid_tags.clear();
-                    }
-                });
-                // 鼠标停在面板上（包括点里面的标签）算有操作，重新计时；到点时唤醒一帧去收起
-                if panel.response.contains_pointer() {
+            // 「按标签显示」弹窗：浮在卡片上面，从按钮下方弹出，宽度和中间栏一样
+            if let (true, Some(btn)) = (self.mid_tags_open, tag_btn) {
+                let col = ui.max_rect();
+                let pos = egui::pos2(col.left(), btn.bottom() + 4.0);
+                let width = col.width();
+                let mut close = false;
+                let popup = egui::Area::new(egui::Id::new("mid_tags_popup"))
+                    .order(egui::Order::Foreground)
+                    .fixed_pos(pos)
+                    .show(ui.ctx(), |ui| {
+                        egui::Frame::popup(ui.style()).show(ui, |ui| {
+                            ui.set_width(width - 16.0);
+                            ui.horizontal(|ui| {
+                                ui.strong("按标签显示");
+                                ui.label(
+                                    RichText::new("可以选多个，满足任一即显示").small().color(ui.visuals().weak_text_color()),
+                                );
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.small_button("关闭").on_hover_text("也可以按 Esc，或点弹窗外面").clicked() {
+                                        close = true;
+                                    }
+                                    if !self.mid_tags.is_empty()
+                                        && ui.small_button("清除").on_hover_text("取消全部选中的标签").clicked()
+                                    {
+                                        self.mid_tags.clear();
+                                    }
+                                });
+                            });
+                            ui.separator();
+                            ScrollArea::vertical().id_salt("mid_tags_scroll").max_height(320.0).show(ui, |ui| {
+                                self.mid_tags_list(ui, &all_tags);
+                            });
+                        });
+                    });
+                let over = popup.response.contains_pointer() || btn.contains(ui.ctx().pointer_hover_pos().unwrap_or_default());
+                // 鼠标停在弹窗上（包括点里面的标签）算有操作，重新计时
+                if popup.response.contains_pointer() {
                     self.mid_tags_t = now;
                 }
-                let left = (self.mid_tags_t + 3.0 - now).max(0.0);
-                ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
+                // 点弹窗外面、按 Esc：关掉
+                let clicked_outside = ui.input(|i| i.pointer.any_pressed()) && !over;
+                if close || clicked_outside || ui.input(|i| i.key_pressed(Key::Escape)) {
+                    self.mid_tags_open = false;
+                } else {
+                    // 到点时唤醒一帧去收起
+                    let left = (self.mid_tags_t + 3.0 - now).max(0.0);
+                    ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(left));
+                }
             }
             if let Some(result) = rename_done {
                 if let (Some(name), Some((old, _))) = (result, self.rename.take()) {
@@ -4002,6 +4062,19 @@ mod ui_tests {
         h.get_by_label("清除").simulate_click();
         h.run();
         assert_eq!(h.query_all_by_label("丙").count(), 2);
+
+        // 弹窗：Esc 关掉；点弹窗外面也关掉
+        h.press_key(Key::Escape);
+        h.run();
+        assert!(h.query_by_label("#灵感").is_none(), "Esc 应该关掉弹窗");
+        h.get_by_label("按标签显示 ▼").simulate_click();
+        h.run();
+        assert!(h.query_by_label("#灵感").is_some());
+        h.query_all_by_label("丙").next().unwrap().simulate_click();
+        h.run();
+        assert!(h.query_by_label("#灵感").is_none(), "点弹窗外面应该关掉");
+        h.get_by_label("按标签显示 ▼").simulate_click();
+        h.run();
 
         // 3 秒没操作自动收起（鼠标停在面板上不算没操作，先移开）
         h.input_mut().events.push(egui::Event::PointerGone);
