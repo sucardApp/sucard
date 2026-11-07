@@ -1529,6 +1529,9 @@ fn text_edit_with_menu(
     let resp = ui
         .scope(|ui| {
             input_visuals(ui);
+            // 编辑状态（卡片编辑、编辑原文）的底色用主界面的主色调
+            let v = ui.visuals_mut();
+            v.extreme_bg_color = v.panel_fill;
             let mut te = make(buf).id(id);
             if let Some(l) = layouter {
                 te = te.layouter(l);
