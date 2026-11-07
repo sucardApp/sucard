@@ -1146,14 +1146,20 @@ impl Store {
 
     // ---------- TODO（右栏）----------
 
-    /// 这个文档的条目是否出现在右栏 TODO 里
+    /// 这个文档的条目是否出现在右栏 TODO 里（保管箱固定不放入）
     pub fn in_todo(&self, rel: &Path) -> bool {
+        if rel == Path::new(VAULT) {
+            return false;
+        }
         let key = rel.to_string_lossy().replace('\\', "/");
         !self.prefs.not_in_todo.contains(&key)
     }
 
-    /// 设置文档是否放入 TODO，并保存
+    /// 设置文档是否放入 TODO，并保存（保管箱固定不放入，不能改）
     pub fn set_in_todo(&mut self, rel: &Path, on: bool) {
+        if rel == Path::new(VAULT) {
+            return;
+        }
         let key = rel.to_string_lossy().replace('\\', "/");
         self.prefs.not_in_todo.retain(|k| *k != key);
         if !on {
@@ -1678,6 +1684,11 @@ mod tests {
         assert!(!s.in_todo(&b) && s.in_todo(&a));
         s.set_in_todo(&b, true);
         assert!(s.in_todo(&b) && s.prefs.not_in_todo.is_empty());
+        // 保管箱固定不放入，改不了
+        let v = PathBuf::from(VAULT);
+        assert!(!s.in_todo(&v));
+        s.set_in_todo(&v, true);
+        assert!(!s.in_todo(&v) && s.prefs.not_in_todo.is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
 

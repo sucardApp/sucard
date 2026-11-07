@@ -10,7 +10,7 @@ use eframe::egui::{
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use store::{find_marks, find_urls, is_block_id, marked_text, is_fixed_doc, parse_task, split_comments, strip_comments, tag_of_word, Item, Store, UiPrefs, FIXED_DOCS, INBOX};
+use store::{find_marks, find_urls, is_block_id, marked_text, is_fixed_doc, parse_task, split_comments, strip_comments, tag_of_word, Item, Store, UiPrefs, FIXED_DOCS, INBOX, VAULT};
 
 /// 默认数据目录的文件夹名（建在用户目录下）
 const DEFAULT_DIR: &str = "Sucard";
@@ -608,7 +608,15 @@ impl App {
         let in_todo = self.store.in_todo(path);
         let text = if in_todo { RichText::new(label) } else { RichText::new(label).color(ui.visuals().weak_text_color()) };
         let resp = nav_block(ui, ("nav_file", path), selected, indent, text, n);
-        let resp = if in_todo { resp } else { resp.on_hover_text("不放入TODO：条目不在右栏显示（右键可改）") };
+        // 保管箱：固定不放入 TODO，没有右键菜单
+        let vault = path == Path::new(VAULT);
+        let resp = if in_todo {
+            resp
+        } else if vault {
+            resp.on_hover_text("保管箱：长期保存，条目不在右栏 TODO 显示")
+        } else {
+            resp.on_hover_text("不放入TODO：条目不在右栏显示（右键可改）")
+        };
         if resp.clicked() {
             self.goto(Sel::File(path.to_path_buf()));
         }
@@ -617,6 +625,9 @@ impl App {
         }
         if let Some(p) = resp.dnd_release_payload::<DragItem>() {
             acts.push(Act::MoveTo(p.0.clone(), path.to_path_buf()));
+        }
+        if vault {
+            return;
         }
         let fixed = is_fixed_doc(path);
         let mut in_todo = self.store.in_todo(path);
