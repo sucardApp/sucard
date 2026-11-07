@@ -203,6 +203,31 @@ pub struct Store {
 
 // ---------- 解析工具 ----------
 
+/// 把使用说明合成一张卡片：第一行是标题和 #使用说明 标签，其余内容都缩进成这张卡片的续行。
+/// 去掉原来每条的标签；任务行改成「• 」（否则会变成单独的卡片）；标题改成【】；
+/// 空行会结束一条，所以去掉。
+fn compact_guide(text: &str) -> String {
+    let mut out = String::from("# 使用说明\n\n- [ ] 使用说明（双击卡片查看全部，或在左栏选中这个文档看「原文」） #使用说明\n");
+    // 跳过原文的大标题「# 使用说明」
+    for line in text.lines().skip(1) {
+        let line = strip_tags(line.trim_end());
+        if line.trim().is_empty() {
+            continue;
+        }
+        let body = if let Some(h) = line.strip_prefix("# ") {
+            format!("【{}】", h.trim())
+        } else if let Some((prefix, _, t, _)) = parse_task(&line) {
+            format!("{}• {t}", " ".repeat(indent_width(&prefix)))
+        } else {
+            line
+        };
+        out.push_str("  ");
+        out.push_str(&body);
+        out.push('\n');
+    }
+    out
+}
+
 /// 一个词如果是标签（#xxx），返回去掉 # 和末尾标点后的标签名
 pub fn tag_of_word(w: &str) -> Option<&str> {
     let t = w.strip_prefix('#')?;
@@ -994,21 +1019,26 @@ impl Store {
     }
 
     /// 生成使用说明文档。已有同名文件时不覆盖，改叫「使用说明 2.md」「使用说明 3.md」……
-    /// 返回生成的文档路径
-    pub fn install_guide(&mut self) -> Option<PathBuf> {
+    /// compact：合成一张卡片、只带一个 #使用说明 标签（UI设置 里重新生成时用）；
+    /// 否则每条说明一张卡片（第一次安装时用）。返回生成的文档路径
+    pub fn install_guide(&mut self, compact: bool) -> Option<PathBuf> {
         let mut rel = PathBuf::from(GUIDE);
         let mut n = 2;
         while self.root.join(&rel).exists() {
             rel = PathBuf::from(format!("使用说明 {n}.md"));
             n += 1;
         }
-        if let Err(e) = write_atomic(&self.root.join(&rel), GUIDE_TEXT) {
+        let text = if compact { compact_guide(GUIDE_TEXT) } else { GUIDE_TEXT.to_string() };
+        if let Err(e) = write_atomic(&self.root.join(&rel), &text) {
             self.error = Some(format!("生成使用说明失败：{e}"));
             return None;
         }
         // 重新读取：条目补上 ^id、进入列表
         self.reload();
-        // 使用说明的标签默认折叠，不占地方
+        // 使用说明的标签默认折叠，不占地方（合成一张卡片时只有一个标签，不用折叠）
+        if compact {
+            return Some(rel);
+        }
         for c in [&mut self.prefs.collapsed_tags, &mut self.prefs.panel_collapsed_tags] {
             if !c.iter().any(|t| t == GUIDE_TAG) {
                 c.push(GUIDE_TAG.to_string());
@@ -1475,7 +1505,7 @@ mod tests {
     fn guide_doc() {
         let root = temp_root("guide");
         let mut s = Store::open(root.clone());
-        let rel = s.install_guide().unwrap();
+        let rel = s.install_guide(false).unwrap();
         assert_eq!(rel, PathBuf::from(GUIDE));
         let items = s.doc_items(&rel);
         let tasks = GUIDE_TEXT.lines().filter(|l| l.starts_with("- [")).count();
@@ -1492,7 +1522,7 @@ mod tests {
         assert_eq!(marked_text(&find(&s, "只复制这一段")), "只复制这一段 还有这一段");
         assert!(s.items.values().any(|it| it.done), "应有一条已完成的示例");
         // 已经有了就不覆盖
-        let again = s.install_guide().unwrap();
+        let again = s.install_guide(false).unwrap();
         assert_eq!(again, PathBuf::from("使用说明 2.md"));
         let _ = std::fs::remove_dir_all(&root);
     }

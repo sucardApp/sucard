@@ -480,7 +480,7 @@ impl App {
         let has_guide = root.join(store::GUIDE).exists();
         let mut store = Store::open(root);
         if first_run && !has_guide {
-            store.install_guide();
+            store.install_guide(false);
         }
         App::with_store(store)
     }
@@ -3261,7 +3261,7 @@ impl App {
             self.uninstall = Some(false);
         }
         if make_guide {
-            if let Some(p) = self.store.install_guide() {
+            if let Some(p) = self.store.install_guide(true) {
                 self.goto(Sel::File(p));
             }
             ctx.request_repaint();
@@ -3710,7 +3710,8 @@ mod ui_tests {
         h.run();
         assert!(h.state().store.root.join("使用说明.md").is_file());
         assert!(h.state().sel == Sel::File(PathBuf::from("使用说明.md")));
-        assert!(h.state().store.items.len() > 20);
+        // UI设置 里重新生成的是合成的一张卡片，只带 #使用说明
+        assert_eq!(h.state().store.all_tags(), vec!["使用说明".to_string()]);
 
         // 换强调色：立刻生效，并写进 state.json
         h.get_by_label("绿").simulate_click();
