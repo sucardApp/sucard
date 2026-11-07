@@ -1,6 +1,6 @@
 [package]
 name = "sucard"
-version = "0.1.16"
+version = "0.1.17"
 edition = "2021"
 description = "素卡：素材库兼待办。A lightweight desktop app for snippets and to-dos stored as plain Markdown."
 license = "MIT OR Apache-2.0"
