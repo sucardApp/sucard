@@ -434,6 +434,8 @@ enum Act {
     ToggleTag(String, String),
     /// 标签面板里折叠 / 展开父标签
     FoldPanelTag(String),
+    /// 打开「完整阅读」弹窗
+    OpenCard(String),
 }
 
 struct App {
@@ -449,6 +451,8 @@ struct App {
     selected: Option<(String, u8)>,
     raw: Option<RawEdit>,
     reading: Option<RawRead>,
+    /// 「完整阅读」弹窗里的条目 id
+    card_view: Option<String>,
     /// 正在改名的文件和输入框里的新名字；只在选中的仍是这个文件时显示
     rename: Option<(PathBuf, String)>,
     rename_focus: bool,
@@ -497,6 +501,7 @@ impl App {
             selected: None,
             raw: None,
             reading: None,
+            card_view: None,
             rename: None,
             rename_focus: false,
             settings_open: false,
@@ -679,7 +684,8 @@ impl App {
     /// 有输入框在打字时不处理。按键先被吃掉，免得勾选框等控件再响应一次。
     fn handle_keys(&mut self, ctx: &egui::Context, acts: &mut Vec<Act>) {
         // 删除确认框、卸载框开着：回车、Esc 归确认框
-        if self.confirm.is_some() || self.uninstall.is_some() {
+        // 「完整阅读」弹窗开着时也不处理（空格、Delete 不作用到卡片）
+        if self.confirm.is_some() || self.uninstall.is_some() || self.card_view.is_some() {
             return;
         }
         let Some((id, place)) = self.selected.clone() else { return };
@@ -754,6 +760,7 @@ impl App {
                 }
                 Act::ToggleTag(id, t) => self.store.toggle_item_tag(&id, &t),
                 Act::FoldPanelTag(t) => self.store.toggle_panel_fold(&t),
+                Act::OpenCard(id) => self.card_view = Some(id),
                 Act::Delete(id) => {
                     if self.editing.as_ref().is_some_and(|(e, _, _)| *e == id) {
                         self.editing = None;
@@ -907,7 +914,7 @@ fn short_url(u: &str) -> String {
 }
 
 /// 原文着色用到的样式（变了才重新着色）
-#[derive(Hash)]
+#[derive(Hash, Clone)]
 struct HiStyle {
     size_bits: u32,
     dark: bool,
@@ -1703,14 +1710,14 @@ fn item_row_content(
 ) -> Option<String> {
     // 鼠标所在的网址（卡片据此处理 Ctrl+单击）
     let mut hovered_url = None;
-    ui.horizontal(|ui| {
+    let is_editing = editing.as_ref().is_some_and(|(id, _, p)| *id == it.id && *p == place);
+    let row = ui.horizontal(|ui| {
         let mut done = it.done;
         let changed = clear_checkbox(ui, &mut done, "").changed();
         if changed {
             acts.push(Act::SetDone(it.id.clone(), done));
         }
 
-        let is_editing = editing.as_ref().is_some_and(|(id, _, p)| *id == it.id && *p == place);
         if is_editing {
             ui.vertical(|ui| {
                 let edit_id = Id::new(("edit", it.id.as_str(), place));
@@ -1762,7 +1769,10 @@ fn item_row_content(
                 );
             });
         } else {
+            // 中间栏卡片右边给「完整阅读」按钮留出位置（按钮等整行排好后再放，好竖向居中）
+            let reserve = if place == 0 { READ_BTN + READ_GAP + 4.0 } else { 0.0 };
             ui.vertical(|ui| {
+                ui.set_max_width(ui.available_width() - reserve);
                 // 卡片上只显示一行：多行只显示首行，过长截断成 …；
                 // 双击或右键「编辑」时才显示全部内容
                 let body = it.body();
@@ -1843,7 +1853,149 @@ fn item_row_content(
             });
         }
     });
+    if place == 0 && !is_editing {
+        let right = ui.max_rect().right() - READ_GAP;
+        let center = egui::pos2(right - READ_BTN / 2.0, row.response.rect.center().y);
+        let rect = Rect::from_center_size(center, egui::vec2(READ_BTN, READ_BTN));
+        if read_button(ui, rect, Id::new(("read_btn", it.id.as_str()))).clicked() {
+            acts.push(Act::OpenCard(it.id.clone()));
+        }
+    }
     hovered_url
+}
+
+/// 「完整阅读」按钮的点击区域边长
+const READ_BTN: f32 = 28.0;
+/// 按钮离卡片内容右边的距离：留开中间栏的滚动条，免得拖滚动条时误点
+const READ_GAP: f32 = 10.0;
+
+/// 卡片右边的「完整阅读」按钮：自己画的展开图标（四个角），悬停时有底色、图标变成强调色
+fn read_button(ui: &mut Ui, rect: Rect, id: Id) -> egui::Response {
+    let resp = ui.interact(rect, id, Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "完整阅读"));
+    let v = ui.visuals();
+    let hovered = resp.hovered();
+    let color = if hovered { v.selection.stroke.color } else { v.weak_text_color() };
+    if hovered {
+        ui.painter().rect_filled(rect, 6.0, v.selection.bg_fill.gamma_multiply(0.6));
+    }
+    let r = rect.shrink(7.0);
+    let l = r.width() * 0.36;
+    let st = Stroke::new(1.6_f32, color);
+    for (c, dx, dy) in [
+        (r.left_top(), 1.0, 1.0),
+        (r.right_top(), -1.0, 1.0),
+        (r.left_bottom(), 1.0, -1.0),
+        (r.right_bottom(), -1.0, -1.0),
+    ] {
+        ui.painter().line_segment([c, c + egui::vec2(dx * l, 0.0)], st);
+        ui.painter().line_segment([c, c + egui::vec2(0.0, dy * l)], st);
+    }
+    resp.on_hover_text("完整阅读")
+}
+
+/// 阅读用的文字：可以选中复制；网址单击打开（不用按 Ctrl）。job 要先设好换行宽度
+fn reading_label(ui: &mut Ui, job: egui::text::LayoutJob) {
+    // 修正中文标点换行。结果按（内容, 宽度）记在这个位置，没变就直接用，不用每帧重算
+    let slot = ui.id().with("cjk_breaks");
+    let key = egui::util::hash(&job);
+    let job = match ui.data(|d| d.get_temp::<(u64, egui::text::LayoutJob)>(slot)) {
+        Some((k, fixed)) if k == key => fixed,
+        _ => {
+            let mut fixed = job;
+            fix_cjk_breaks(ui, &mut fixed);
+            ui.data_mut(|d| d.insert_temp(slot, (key, fixed.clone())));
+            fixed
+        }
+    };
+    let urls = find_urls(&job.text);
+    let text = job.text.clone();
+    let galley = ui.fonts(|f| f.layout_job(job.clone()));
+    let resp = ui.add(Label::new(job).selectable(true));
+    if let Some(pos) = ui.ctx().pointer_hover_pos().filter(|p| resp.rect.contains(*p)) {
+        let ci = galley.cursor_from_pos(pos - resp.rect.min).ccursor.index;
+        let bi = text.char_indices().nth(ci).map_or(text.len(), |(b, _)| b);
+        if let Some(r) = urls.iter().find(|r| r.start <= bi && bi < r.end) {
+            let u = text[r.clone()].to_string();
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+            if resp.clicked() {
+                open_link(ui.ctx(), &u);
+            }
+            resp.on_hover_text(format!("{u}\n单击打开"));
+        }
+    }
+}
+
+/// 中文换行修正：egui 自带的规则漏了全角逗号、分号、冒号、问号、感叹号、右括号等，
+/// 它们会出现在行首；开头的括号、引号也可能留在行尾。排版后逐行检查，不合规的就在前面
+/// 插一个换行，把上一行最后一个字（或行尾的开括号）挤到下一行。挤完可能又有新的，最多查几遍。
+fn fix_cjk_breaks(ui: &Ui, job: &mut egui::text::LayoutJob) {
+    const NO_START: &str = "，。、；：！？）」』】》〉”’…～,.;:!?)]}";
+    const NO_END: &str = "（「『【《〈“‘";
+    for _ in 0..6 {
+        let galley = ui.fonts(|f| f.layout_job(job.clone()));
+        let rows = &galley.rows;
+        // 要在哪个字前面换行（字符序号）
+        let mut at: Vec<usize> = Vec::new();
+        let mut start = 0;
+        for (i, row) in rows.iter().enumerate() {
+            let n = row.char_count_excluding_newline();
+            let wrapped_from_prev = i > 0 && !rows[i - 1].ends_with_newline;
+            if wrapped_from_prev && rows[i - 1].char_count_excluding_newline() > 1 {
+                if row.glyphs.first().is_some_and(|g| NO_START.contains(g.chr)) {
+                    at.push(start - 1);
+                }
+            }
+            let wraps_to_next = !row.ends_with_newline && i + 1 < rows.len();
+            if wraps_to_next && n > 1 && row.glyphs.last().is_some_and(|g| NO_END.contains(g.chr)) {
+                at.push(start + n - 1);
+            }
+            start += row.char_count_including_newline();
+        }
+        if at.is_empty() {
+            return;
+        }
+        at.sort_unstable();
+        at.dedup();
+        for ci in at.into_iter().rev() {
+            let Some((b, _)) = job.text.char_indices().nth(ci) else { continue };
+            job.text.insert(b, '\n');
+            for sec in &mut job.sections {
+                if sec.byte_range.start > b {
+                    sec.byte_range = sec.byte_range.start + 1..sec.byte_range.end + 1;
+                } else if sec.byte_range.end > b {
+                    sec.byte_range.end += 1;
+                }
+            }
+        }
+    }
+}
+
+/// 「完整阅读」底部的操作按钮：平时没有边框，悬停时有浅底色
+fn bar_button(ui: &mut Ui, text: &str, enabled: bool) -> egui::Response {
+    ui.add_enabled(
+        enabled,
+        egui::Button::new(text)
+            .frame(false)
+            .min_size(egui::vec2(0.0, ui.spacing().interact_size.y + 6.0)),
+    )
+}
+
+/// 「完整阅读」右上角的关闭按钮：自己画的 ×，悬停时有圆形底色
+fn close_button(ui: &mut Ui, rect: Rect) -> egui::Response {
+    let resp = ui.interact(rect, Id::new("card_view_close"), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "关闭"));
+    let v = ui.visuals();
+    let color = if resp.hovered() { v.strong_text_color() } else { v.weak_text_color() };
+    if resp.hovered() {
+        ui.painter().circle_filled(rect.center(), rect.width() / 2.0, v.widgets.hovered.weak_bg_fill);
+    }
+    let r = rect.width() * 0.2;
+    let c = rect.center();
+    let st = Stroke::new(1.6_f32, color);
+    ui.painter().line_segment([c + egui::vec2(-r, -r), c + egui::vec2(r, r)], st);
+    ui.painter().line_segment([c + egui::vec2(r, -r), c + egui::vec2(-r, r)], st);
+    resp.on_hover_text("关闭（Esc）")
 }
 
 /// 看得清的勾选框：默认的勾选框底色和背景（卡片、面板）几乎一样，看不清，
@@ -2634,25 +2786,8 @@ impl App {
                 ScrollArea::vertical().id_salt("read_scroll").auto_shrink([false, false]).show(ui, |ui| {
                     let style = HiStyle::of(ui);
                     let mut job = ui.ctx().memory_mut(|m| m.caches.cache::<ReadCache>().get((&style, rd.text.as_str())));
-                    let width = ui.available_width();
-                    job.wrap.max_width = width;
-                    let urls = find_urls(&job.text);
-                    let text = job.text.clone();
-                    let galley = ui.fonts(|f| f.layout_job(job.clone()));
-                    let resp = ui.add(Label::new(job).selectable(true));
-                    // 网址：单击打开（阅读时不用按 Ctrl）
-                    if let Some(pos) = ui.ctx().pointer_hover_pos().filter(|p| resp.rect.contains(*p)) {
-                        let ci = galley.cursor_from_pos(pos - resp.rect.min).ccursor.index;
-                        let bi = text.char_indices().nth(ci).map_or(text.len(), |(b, _)| b);
-                        if let Some(r) = urls.iter().find(|r| r.start <= bi && bi < r.end) {
-                            let u = text[r.clone()].to_string();
-                            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-                            if resp.clicked() {
-                                open_link(ui.ctx(), &u);
-                            }
-                            resp.on_hover_text(format!("{u}\n单击打开"));
-                        }
-                    }
+                    job.wrap.max_width = ui.available_width();
+                    reading_label(ui, job);
                 });
                 if self.confirm.is_none() && ctx.input(|i| i.key_pressed(Key::Escape)) {
                     back = true;
@@ -2798,6 +2933,7 @@ impl App {
         }
 
         self.settings_window(ctx);
+        self.card_dialog(ctx, &mut acts);
         self.confirm_dialog(ctx, &mut acts);
         self.uninstall_dialog(ctx);
         self.apply(acts);
@@ -2806,6 +2942,173 @@ impl App {
         if self.ui_dirty && !ctx.input(|i| i.pointer.any_down()) {
             self.store.save_state();
             self.ui_dirty = false;
+        }
+    }
+
+    /// 「完整阅读」：窗口中央一张小卡片，宽约 480、高度随内容（最多窗口的 60%），配色跟随主题，
+    /// 背景轻度压暗。顶部是所在文档和标签，中间是全部内容，底部一排操作（不含编辑、删除）。
+    /// 点外面、Esc 或 × 关掉；条目没了（被删、文件被改）也关掉。
+    fn card_dialog(&mut self, ctx: &egui::Context, acts: &mut Vec<Act>) {
+        let Some(id) = self.card_view.clone() else { return };
+        let Some(it) = self.store.items.get(&id).cloned() else {
+            self.card_view = None;
+            return;
+        };
+        let tags_key = Id::new("card_view_tags");
+        let copied_key = Id::new("card_view_copied");
+        let mut close = false;
+        let store = &self.store;
+        let screen = ctx.screen_rect();
+        let width = (screen.width() - 48.0).clamp(240.0, 480.0);
+        let max_body = (screen.height() * 0.6 - 120.0).max(80.0);
+        let dark = ctx.style().visuals.dark_mode;
+        let v = ctx.style().visuals.clone();
+        let modal = egui::Modal::new(Id::new("card_view"))
+            .backdrop_color(Color32::from_black_alpha(if dark { 110 } else { 60 }))
+            .frame(
+                egui::Frame::new()
+                    .fill(v.window_fill)
+                    .stroke(v.window_stroke)
+                    .corner_radius(12)
+                    .shadow(v.window_shadow)
+                    .inner_margin(egui::Margin { left: 20, right: 12, top: 12, bottom: 14 }),
+            )
+            .show(ctx, |ui| {
+                ui.set_width(width);
+                let weak = ui.visuals().weak_text_color();
+
+                // 顶部：所在文档、标签，右边 ×
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let (rect, _) = ui.allocate_exact_size(egui::vec2(26.0, 26.0), Sense::hover());
+                        if close_button(ui, rect).clicked() {
+                            close = true;
+                        }
+                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true), |ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            let mut head = file_label(&it.file);
+                            if it.done {
+                                head.push_str(" · 已完成");
+                            }
+                            ui.label(RichText::new(head).small().color(weak));
+                            ui.add_space(4.0);
+                            for t in &it.tags() {
+                                tag_chip(ui, t);
+                            }
+                        });
+                    });
+                });
+                ui.add_space(6.0);
+
+                // 正文：按「阅读原文」的样式排版；已完成的变灰加删除线
+                ScrollArea::vertical().max_height(max_body).auto_shrink([false, true]).show(ui, |ui| {
+                    ui.set_width(width - 8.0);
+                    let st = HiStyle::of(ui);
+                    let body = it.body();
+                    let mut job = render_reading(&st, if body.is_empty() { "（空）" } else { &body });
+                    if it.done {
+                        for s in &mut job.sections {
+                            s.format.color = st.weak;
+                            s.format.strikethrough = Stroke::new(1.0_f32, st.weak);
+                        }
+                    }
+                    job.wrap.max_width = width - 8.0;
+                    reading_label(ui, job);
+                });
+
+                // 细分隔线
+                ui.add_space(10.0);
+                let (line, _) = ui.allocate_exact_size(egui::vec2(width - 8.0, 1.0), Sense::hover());
+                ui.painter().rect_filled(line, 0.0, ui.visuals().widgets.noninteractive.bg_stroke.color);
+                ui.add_space(4.0);
+
+                // 底部操作
+                let now = ui.input(|i| i.time);
+                let copy = |ui: &mut Ui, text: String| {
+                    ui.ctx().copy_text(text);
+                    ui.data_mut(|d| d.insert_temp(copied_key, now));
+                };
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    let dot = |ui: &mut Ui| {
+                        ui.label(RichText::new("·").color(weak));
+                    };
+                    let copied = ui.data(|d| d.get_temp::<f64>(copied_key)).is_some_and(|t| now - t < 1.5);
+                    if copied {
+                        ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+                    }
+                    if bar_button(ui, if copied { "已复制" } else { "复制全部" }, true)
+                        .on_hover_text("复制全部正文，不含 #标签 和 %%备注%%")
+                        .clicked()
+                    {
+                        copy(ui, strip_comments(&it.body()));
+                    }
+                    dot(ui);
+                    let part = marked_text(&it.body());
+                    if bar_button(ui, "部分复制", !part.is_empty())
+                        .on_hover_text("只复制 ==标记== 的内容")
+                        .on_disabled_hover_text("没有 ==标记== 的内容")
+                        .clicked()
+                    {
+                        copy(ui, part);
+                    }
+                    let urls = urls_in(&it.text);
+                    if urls.len() == 1 {
+                        dot(ui);
+                        if bar_button(ui, "打开链接", true).on_hover_text(&urls[0]).clicked() {
+                            open_link(ui.ctx(), &urls[0]);
+                        }
+                        dot(ui);
+                        if bar_button(ui, "复制链接", true).on_hover_text(&urls[0]).clicked() {
+                            copy(ui, urls[0].clone());
+                        }
+                    } else if urls.len() > 1 {
+                        dot(ui);
+                        let r = ui.menu_button(format!("链接（{}）", urls.len()), |ui| {
+                            for u in urls.iter().take(8) {
+                                if ui.button(format!("打开 {}", short_url(u))).on_hover_text(u).clicked() {
+                                    open_link(ui.ctx(), u);
+                                    ui.close_menu();
+                                }
+                            }
+                            ui.separator();
+                            if ui.button("复制全部链接").on_hover_text("每行一个").clicked() {
+                                ui.ctx().copy_text(urls.join("\n"));
+                                ui.close_menu();
+                            }
+                        });
+                        r.response.on_hover_text("打开或复制里面的网址");
+                    }
+                    dot(ui);
+                    let tags_open = ui.data(|d| d.get_temp::<bool>(tags_key)).unwrap_or(false);
+                    if bar_button(ui, if tags_open { "收起标签" } else { "编辑标签" }, true).clicked() {
+                        ui.data_mut(|d| d.insert_temp(tags_key, !tags_open));
+                    }
+                    dot(ui);
+                    if bar_button(ui, if it.done { "标记为未完成" } else { "标记为完成" }, true).clicked() {
+                        acts.push(Act::SetDone(it.id.clone(), !it.done));
+                    }
+                });
+
+                // 编辑标签：在卡片里展开标签面板，每点一下立即保存
+                if ui.data(|d| d.get_temp::<bool>(tags_key)).unwrap_or(false) {
+                    ui.add_space(4.0);
+                    egui::Frame::new()
+                        .fill(ui.visuals().faint_bg_color)
+                        .corner_radius(8)
+                        .inner_margin(10)
+                        .show(ui, |ui| {
+                            ui.set_width(width - 28.0);
+                            tag_menu(ui, &it, store, acts);
+                        });
+                }
+            });
+        if close || modal.should_close() {
+            self.card_view = None;
+            ctx.data_mut(|d| {
+                d.remove::<bool>(tags_key);
+                d.remove::<f64>(copied_key);
+            });
         }
     }
 
