@@ -1972,8 +1972,16 @@ fn fix_cjk_breaks(ui: &Ui, job: &mut egui::text::LayoutJob) {
         for (i, row) in rows.iter().enumerate() {
             let n = row.char_count_excluding_newline();
             let wrapped_from_prev = i > 0 && !rows[i - 1].ends_with_newline;
-            if wrapped_from_prev && rows[i - 1].char_count_excluding_newline() > 1 {
-                if row.glyphs.first().is_some_and(|g| NO_START.contains(g.chr)) {
+            if wrapped_from_prev && row.glyphs.first().is_some_and(|g| NO_START.contains(g.chr)) {
+                // 行首这串标点
+                let lead: Vec<_> = row.glyphs.iter().take_while(|g| NO_START.contains(g.chr)).collect();
+                let lead_w: f32 = lead.iter().map(|g| g.advance_width).sum();
+                // 上一行还放得下（常见于后面跟着一长串网址、英文单词，egui 只好在标点前断开）：
+                // 把标点拉回上一行，改在标点后面换行
+                if lead.len() < n && rows[i - 1].rect.max.x + lead_w <= job.effective_wrap_width() {
+                    at.push(start + lead.len());
+                } else if rows[i - 1].char_count_excluding_newline() > 1 {
+                    // 放不下：把上一行最后一个字挤下来陪它
                     at.push(start - 1);
                 }
             }
