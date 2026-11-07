@@ -44,11 +44,11 @@ fn main() -> eframe::Result<()> {
             .with_icon(std::sync::Arc::new(
                 eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon-256.png")).unwrap_or_default(),
             ))
-            .with_title("素签"),
+            .with_title("素卡"),
         ..Default::default()
     };
     eframe::run_native(
-        "素签",
+        "素卡",
         options,
         Box::new(move |cc| Ok(Box::new(App::new(cc, root)))),
     )
@@ -2143,7 +2143,7 @@ fn input_margin() -> egui::Margin {
     egui::Margin::symmetric(8, INPUT_PAD_Y)
 }
 
-/// 输入框统一样式：平时有一圈中灰细边框，悬停加深，输入时强调色加粗；圆角跟着 UI设置。
+/// 输入框统一样式：平时有一圈中灰细边框，悬停加深，输入时强调色加粗；圆角跟着 设置。
 /// 在 ui.scope 里调用，只影响这一个输入框，不影响按钮等其他控件。
 fn input_visuals(ui: &mut Ui) {
     let r = uip(ui).radius;
@@ -2436,7 +2436,7 @@ impl App {
                 if clear_checkbox(ui, &mut self.store.prefs.hide_done, "隐藏已完成").changed() {
                     self.store.save_state();
                 }
-                if ui.add(egui::Button::new("UI设置").selected(self.settings_open)).on_hover_text("外观设置").clicked() {
+                if ui.add(egui::Button::new("设置").selected(self.settings_open)).on_hover_text("外观、重新生成使用说明、卸载").clicked() {
                     self.settings_open = !self.settings_open;
                 }
                 if ui.button("刷新").on_hover_text("重新读取磁盘上的文件").clicked() {
@@ -3341,7 +3341,7 @@ impl App {
         let modal = egui::Modal::new(Id::new("uninstall")).show(ctx, |ui| {
             ui.set_width(480.0);
             let weak = ui.visuals().weak_text_color();
-            ui.strong("卸载素签");
+            ui.strong("卸载素卡");
             ui.add_space(6.0);
             ui.label("会删除：");
             for f in &plan.files {
@@ -3569,7 +3569,7 @@ impl App {
         let mut open = true;
         let mut make_guide = false;
         let mut open_uninstall = false;
-        egui::Window::new("UI设置")
+        egui::Window::new("设置")
             .open(&mut open)
             .resizable(false)
             .collapsible(false)
@@ -3672,7 +3672,7 @@ impl App {
                 ui.separator();
                 let red = ui.visuals().error_fg_color;
                 if ui
-                    .button(RichText::new("卸载素签…").color(red))
+                    .button(RichText::new("卸载素卡…").color(red))
                     .on_hover_text("删除程序；可选把数据移到回收站。会先让你确认")
                     .clicked()
                 {
@@ -4210,7 +4210,7 @@ mod ui_tests {
     fn settings_window_changes_and_saves() {
         let mut h = harness("settings", "- [ ] 线路 ^aaa111\n");
         let default_sel = h.ctx.style_of(egui::Theme::Light).visuals.selection.bg_fill;
-        h.get_by_label("UI设置").simulate_click();
+        h.get_by_label("设置").simulate_click();
         h.run();
         assert!(h.query_by_label("恢复默认").is_some(), "设置窗口没打开");
 
@@ -4219,7 +4219,7 @@ mod ui_tests {
         h.run();
         assert!(h.state().store.root.join("使用说明.md").is_file());
         assert!(h.state().sel == Sel::File(PathBuf::from("使用说明.md")));
-        // UI设置 里重新生成的是合成的一张卡片，只带 #使用说明
+        // 设置 里重新生成的是合成的一张卡片，只带 #使用说明
         assert_eq!(h.state().store.all_tags(), vec!["使用说明".to_string()]);
 
         // 换强调色：立刻生效，并写进 state.json
@@ -4275,7 +4275,7 @@ mod ui_tests {
     #[test]
     fn font_size_slider_drag_is_stable() {
         let mut h = harness("fontdrag", "- [ ] 线路 ^aaa111\n");
-        h.get_by_label("UI设置").simulate_click();
+        h.get_by_label("设置").simulate_click();
         h.run();
         // 第一个拖动条是字号
         let r = h
@@ -4311,7 +4311,7 @@ mod ui_tests {
         assert_eq!(h.state().store.prefs.ui.font_size, last);
     }
 
-    /// UI设置 窗口里第 row 行（字号 0、小字大小 1、卡片间距 2、圆角 3、左栏块高度 4）的「-」或「+」按钮
+    /// 设置 窗口里第 row 行（字号 0、小字大小 1、卡片间距 2、圆角 3、左栏块高度 4）的「-」或「+」按钮
     fn step_btn(h: &Harness<'static, App>, label: &str, row: usize) -> egui::Pos2 {
         let mut all: Vec<_> = h
             .get_all_by_role_and_label(egui::accesskit::Role::Button, label)
@@ -4327,7 +4327,7 @@ mod ui_tests {
         let mut h = harness("stepper", "- [ ] 线路 ^aaa111\n");
         // 光标闪烁默认关闭
         assert!(!h.ctx.style_of(egui::Theme::Light).visuals.text_cursor.blink);
-        h.get_by_label("UI设置").simulate_click();
+        h.get_by_label("设置").simulate_click();
         h.run();
 
         // 字号 +、-：每次 0.5
@@ -5135,7 +5135,7 @@ mod ui_tests {
     #[test]
     fn warm_themes() {
         let mut h = harness("eye", "- [ ] 一条 ^aaa111\n");
-        h.get_by_label("UI设置").simulate_click();
+        h.get_by_label("设置").simulate_click();
         h.run();
         // (选项, 编号, 主色, 深色, 主题强调色)
         for (label, n, bg, dark, accent) in [
@@ -5203,28 +5203,28 @@ mod ui_tests {
         let mut h = harness("uninstallui", "- [ ] 一条 ^aaa111\n");
         h.state_mut().store.save_state();
         h.run();
-        h.get_by_label("UI设置").simulate_click();
+        h.get_by_label("设置").simulate_click();
         h.run();
         // 取消：什么都不做
-        h.get_by_label("卸载素签…").simulate_click();
+        h.get_by_label("卸载素卡…").simulate_click();
         h.run();
-        assert!(h.query_by_label("卸载素签").is_some(), "没弹出卸载框");
+        assert!(h.query_by_label("卸载素卡").is_some(), "没弹出卸载框");
         assert!(h.query_by_label_contains("会删除").is_some());
         assert!(h.query_by_label_contains("不勾选时数据保留").is_some(), "删除数据应默认不勾");
         h.get_by_label("取消").simulate_click();
         h.run();
-        assert!(h.query_by_label("卸载素签").is_none());
+        assert!(h.query_by_label("卸载素卡").is_none());
         assert_eq!(h.state().uninstall_ran, None);
 
         // 默认不删数据
-        h.get_by_label("卸载素签…").simulate_click();
+        h.get_by_label("卸载素卡…").simulate_click();
         h.run();
         h.get_by_role_and_label(egui::accesskit::Role::Button, "卸载").simulate_click();
         h.run();
         assert_eq!(h.state().uninstall_ran, Some(false));
 
         // 勾上「同时删除我的数据」
-        h.get_by_label("卸载素签…").simulate_click();
+        h.get_by_label("卸载素卡…").simulate_click();
         h.run();
         h.get_by_label("同时删除我的数据（移到回收站，可以还原）").simulate_click();
         h.run();

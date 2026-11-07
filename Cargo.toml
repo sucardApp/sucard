@@ -2,7 +2,7 @@
 name = "sucard"
 version = "0.1.12"
 edition = "2021"
-description = "素签：素材库兼待办。A lightweight desktop app for snippets and to-dos stored as plain Markdown."
+description = "素卡：素材库兼待办。A lightweight desktop app for snippets and to-dos stored as plain Markdown."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/sucardApp/sucard"
 readme = "README.md"

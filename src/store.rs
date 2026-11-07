@@ -12,7 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const INBOX: &str = "收件箱.md";
 pub const VAULT: &str = "保管箱.md";
-/// 自带的使用说明（第一次使用时生成，也可以在 UI设置 里重新生成）
+/// 自带的使用说明（第一次使用时生成，也可以在 设置 里重新生成）
 pub const GUIDE: &str = "使用说明.md";
 const GUIDE_TEXT: &str = include_str!("../assets/使用说明.md");
 /// 使用说明里所有标签的根标签；生成使用说明时在左栏和标签面板里都默认折叠
@@ -1059,7 +1059,7 @@ impl Store {
     }
 
     /// 生成使用说明文档。已有同名文件时不覆盖，改叫「使用说明 2.md」「使用说明 3.md」……
-    /// compact：合成一张卡片、只带一个 #使用说明 标签（UI设置 里重新生成时用）；
+    /// compact：合成一张卡片、只带一个 #使用说明 标签（设置 里重新生成时用）；
     /// 否则每条说明一张卡片（第一次安装时用）。返回生成的文档路径
     pub fn install_guide(&mut self, compact: bool) -> Option<PathBuf> {
         let mut rel = PathBuf::from(GUIDE);

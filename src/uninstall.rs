@@ -43,7 +43,7 @@ pub fn plan(exe: &Path, data_dir: &Path, home: Option<&Path>, env_var: bool) -> 
         }
     }
     let data_ok = if !data_dir.join(".sucard").is_dir() {
-        Err("这个文件夹里没有 .sucard，看起来不是素签的数据目录，不会删除".to_string())
+        Err("这个文件夹里没有 .sucard，看起来不是素卡的数据目录，不会删除".to_string())
     } else if data_dir.parent().is_none_or(|p| p.as_os_str().is_empty()) {
         Err("数据目录是磁盘根目录，不能整个删除".to_string())
     } else if home.is_some_and(|h| same_path(h, data_dir)) {
