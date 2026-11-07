@@ -1953,7 +1953,7 @@ const READ_BTN: f32 = 28.0;
 /// 按钮离卡片内容右边的距离：留开中间栏的滚动条，免得拖滚动条时误点
 const READ_GAP: f32 = 10.0;
 
-/// 卡片右边的「完整阅读」按钮：自己画的展开图标（四个角），悬停时有底色、图标变成强调色
+/// 卡片右边的「完整阅读」按钮：自己画的拉伸图标（右上、左下两个箭头），悬停时有底色、图标变成强调色
 fn read_button(ui: &mut Ui, rect: Rect, id: Id) -> egui::Response {
     let resp = ui.interact(rect, id, Sense::click());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "完整阅读"));
@@ -1963,17 +1963,30 @@ fn read_button(ui: &mut Ui, rect: Rect, id: Id) -> egui::Response {
     if hovered {
         ui.painter().rect_filled(rect, 6.0, v.selection.bg_fill.gamma_multiply(0.6));
     }
+    // 右上、左下两个对角箭头（↗↙）：箭头头 + 往中心伸的斜杆
+    // 箭头头用一条折线画，尖角是连起来的，
+    // 斜杆才会正好从尖角出发（分开画两段时尖角缺一块，斜杆看着偏到内侧、像是歪的）
+    let p = ui.painter();
     let r = rect.shrink(7.0);
-    let l = r.width() * 0.36;
-    let st = Stroke::new(1.6_f32, color);
-    for (c, dx, dy) in [
-        (r.left_top(), 1.0, 1.0),
-        (r.right_top(), -1.0, 1.0),
-        (r.left_bottom(), 1.0, -1.0),
-        (r.right_bottom(), -1.0, -1.0),
-    ] {
-        ui.painter().line_segment([c, c + egui::vec2(dx * l, 0.0)], st);
-        ui.painter().line_segment([c, c + egui::vec2(0.0, dy * l)], st);
+    // 长度按实际像素取整（缩放不是 100% 时，按点取整对不齐像素），左下那个箭头才和右上一样清楚
+    let ppp = ui.ctx().pixels_per_point();
+    let px = |x: f32| (x * ppp).round() / ppp;
+    let w = px(r.width());
+    let head = px(w * 0.30);
+    let shaft = px(w * 0.42);
+    // 线宽取整数个实际像素；奇数宽对齐到像素中心、偶数宽对齐到像素边界，不发虚
+    let lw = (1.3 * ppp).round().max(1.0);
+    let st = Stroke::new(lw / ppp, color);
+    let tr = if lw as i32 % 2 == 1 { p.round_pos_to_pixel_center(r.right_top()) } else { p.round_pos_to_pixels(r.right_top()) };
+    let bl = tr + egui::vec2(-w, w);
+    // 箭头两条边和斜杆的夹角（两边加起来就是张开的角度；直角是 45°）
+    let half = 36_f32.to_radians();
+    for (c, dx, dy) in [(tr, -1.0, 1.0), (bl, 1.0, -1.0)] {
+        // 从尖角往中心的方向，左右各转 half 就是两条边
+        let u = egui::vec2(dx, dy).normalized();
+        let side = |a: f32| egui::vec2(u.x * a.cos() - u.y * a.sin(), u.x * a.sin() + u.y * a.cos()) * head;
+        p.line(vec![c + side(half), c, c + side(-half)], st);
+        p.line_segment([c, c + egui::vec2(dx * shaft, dy * shaft)], st);
     }
     resp.on_hover_text("完整阅读")
 }
