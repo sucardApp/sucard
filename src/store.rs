@@ -124,8 +124,10 @@ pub struct Prefs {
 pub struct UiPrefs {
     /// 0 跟随系统，1 浅色，2 深色，3 护眼，5 樱米，6 薰衣草，7 深海，8 薄荷，9 羊皮纸（4 是已移除的护眼（浅），读到时改成樱米）
     pub theme: u8,
-    /// 强调色预设的序号，0 是 egui 默认的蓝色
+    /// 强调色预设的序号，0 是 egui 默认的蓝色；等于预设个数（7）时用 custom_accent
     pub accent: u8,
+    /// 自定义强调色（RGB）
+    pub custom_accent: [u8; 3],
     /// 正文字号（egui 默认 12.5），其他文字按比例缩放
     pub font_size: f32,
     /// 小号字（标签、文件名、提示等）是正文的百分之几
@@ -145,6 +147,7 @@ impl Default for UiPrefs {
         UiPrefs {
             theme: 0,
             accent: 0,
+            custom_accent: [1, 86, 151],
             font_size: 12.5,
             small_pct: 85.0,
             gap: 4.0,

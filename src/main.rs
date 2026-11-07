@@ -112,7 +112,12 @@ fn apply_ui_prefs(ctx: &egui::Context, p: &UiPrefs) {
         // 光标不闪时，有输入框获得焦点也不会一直重画
         style.visuals.text_cursor.blink = p.cursor_blink;
         // 强调色：选了预设就用预设；选「默认蓝」时，配色主题用自己的强调色
-        let preset = ACCENTS.get(p.accent as usize).and_then(|a| a.1).map(|(r, g, b)| Color32::from_rgb(r, g, b));
+        let preset = if p.accent as usize == ACCENTS.len() {
+            let [r, g, b] = p.custom_accent;
+            Some(Color32::from_rgb(r, g, b))
+        } else {
+            ACCENTS.get(p.accent as usize).and_then(|a| a.1).map(|(r, g, b)| Color32::from_rgb(r, g, b))
+        };
         if let Some(base) = preset.or_else(|| themed.and_then(|c| c.accent)) {
             let dark = theme == egui::Theme::Dark;
             let v = &mut style.visuals;
@@ -3141,6 +3146,17 @@ impl App {
                             if resp.on_hover_text(*name).clicked() {
                                 p.accent = i as u8;
                             }
+                        }
+                        // 自定义：点取色按钮选色，选了就切到自定义
+                        let custom = ACCENTS.len() as u8;
+                        let resp = egui::color_picker::color_edit_button_srgb(ui, &mut p.custom_accent)
+                            .on_hover_text("自定义");
+                        if resp.changed() || resp.clicked() {
+                            p.accent = custom;
+                        }
+                        if p.accent == custom {
+                            let c = ui.visuals().strong_text_color();
+                            ui.painter().rect_stroke(resp.rect.expand(2.0), 3.0, Stroke::new(2.0_f32, c), egui::StrokeKind::Outside);
                         }
                     });
                     ui.end_row();
