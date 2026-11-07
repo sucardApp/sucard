@@ -947,6 +947,12 @@ impl HiStyle {
             mark: mark_bg(v.dark_mode),
         }
     }
+
+    /// 阅读用（阅读原文、完整阅读）：字号和正文一样。of() 取的是正文的行高，比字号大一些
+    fn body(ui: &Ui) -> Self {
+        let size = egui::TextStyle::Body.resolve(ui.style()).size;
+        HiStyle { size_bits: size.to_bits(), ..HiStyle::of(ui) }
+    }
 }
 
 #[derive(Default)]
@@ -2784,7 +2790,7 @@ impl App {
                 });
                 ui.separator();
                 ScrollArea::vertical().id_salt("read_scroll").auto_shrink([false, false]).show(ui, |ui| {
-                    let style = HiStyle::of(ui);
+                    let style = HiStyle::body(ui);
                     let mut job = ui.ctx().memory_mut(|m| m.caches.cache::<ReadCache>().get((&style, rd.text.as_str())));
                     job.wrap.max_width = ui.available_width();
                     reading_label(ui, job);
@@ -3003,7 +3009,7 @@ impl App {
                 // 正文：按「阅读原文」的样式排版；已完成的变灰加删除线
                 ScrollArea::vertical().max_height(max_body).auto_shrink([false, true]).show(ui, |ui| {
                     ui.set_width(width - 8.0);
-                    let st = HiStyle::of(ui);
+                    let st = HiStyle::body(ui);
                     let body = it.body();
                     let mut job = render_reading(&st, if body.is_empty() { "（空）" } else { &body });
                     if it.done {
