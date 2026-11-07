@@ -1365,6 +1365,8 @@ fn tag_panel(ui: &mut Ui, have: &[String], store: &Store, key: Id) -> Option<Tag
 
     // 新建标签
     let mut buf: String = ui.data(|d| d.get_temp(key)).unwrap_or_default();
+    // 这里不加右键菜单：面板本身在弹出菜单里，egui 的菜单不能嵌套，点右键菜单项会把面板关掉。
+    // Ctrl+C / V / X / A 照常能用。
     let r = ui
         .scope(|ui| {
             input_visuals(ui);
@@ -1520,6 +1522,42 @@ fn text_edit_with_menu(
     if ui.memory(|m| m.has_focus(id)) && ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, Key::E)) {
         apply_edit_op(ui.ctx(), id, buf, &EditOp::Mark);
     }
+    edit_with_menu(ui, id, buf, Some((save, cancel)), |ui, buf| {
+        // 编辑状态（卡片编辑、编辑原文）的底色用主界面的主色调
+        let v = ui.visuals_mut();
+        v.extreme_bg_color = v.panel_fill;
+        let mut te = make(buf).id(id);
+        if let Some(l) = layouter {
+            te = te.layouter(l);
+        }
+        ui.add(te)
+    })
+}
+
+/// 带右键菜单（撤销、重做、剪切、复制、粘贴、全选）的单行输入框：快速添加、搜索、新建文档等。
+/// 粘贴进来的换行换成空格。
+fn input_with_menu(
+    ui: &mut Ui,
+    id: Id,
+    buf: &mut String,
+    make: impl FnOnce(&mut String) -> TextEdit<'_>,
+) -> MenuEdit {
+    let r = edit_with_menu(ui, id, buf, None, |ui, buf| ui.add(make(buf).id(id)));
+    if buf.contains(['\n', '\r']) {
+        // 一个字符换一个字符，光标位置不用动
+        *buf = buf.replace(['\n', '\r'], " ");
+    }
+    r
+}
+
+/// 编辑框 + 右键菜单的公共部分。extra 为 Some 时菜单里多出 %%/== 和「保存」「取消」两项。
+fn edit_with_menu(
+    ui: &mut Ui,
+    id: Id,
+    buf: &mut String,
+    extra: Option<((&str, &str), (&str, &str))>,
+    add: impl FnOnce(&mut Ui, &mut String) -> egui::Response,
+) -> MenuEdit {
     let right_press = ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary));
     let saved_range = if right_press {
         egui::text_edit::TextEditState::load(ui.ctx(), id).and_then(|s| s.cursor.char_range())
@@ -1529,14 +1567,7 @@ fn text_edit_with_menu(
     let resp = ui
         .scope(|ui| {
             input_visuals(ui);
-            // 编辑状态（卡片编辑、编辑原文）的底色用主界面的主色调
-            let v = ui.visuals_mut();
-            v.extreme_bg_color = v.panel_fill;
-            let mut te = make(buf).id(id);
-            if let Some(l) = layouter {
-                te = te.layouter(l);
-            }
-            ui.add(te)
+            add(ui, buf)
         })
         .inner;
     if let Some(r) = saved_range {
@@ -1562,7 +1593,7 @@ fn text_edit_with_menu(
         )
     };
     let mut op = None;
-    resp.context_menu(|ui| op = edit_menu(ui, has_sel, can_undo, can_redo, save, cancel));
+    resp.context_menu(|ui| op = edit_menu(ui, has_sel, can_undo, can_redo, extra));
     // 注意：egui 0.31 的 context_menu() 只在菜单关闭的那一帧返回 Some，
     // 不能用它判断菜单是否开着，要用 context_menu_opened()
     let menu_open = resp.context_menu_opened();
@@ -1612,8 +1643,7 @@ fn edit_menu(
     has_sel: bool,
     can_undo: bool,
     can_redo: bool,
-    save: (&str, &str),
-    cancel: (&str, &str),
+    extra: Option<((&str, &str), (&str, &str))>,
 ) -> Option<EditOp> {
     let mut op = None;
     if menu_item(ui, can_undo, "撤销", "Ctrl+Z") {
@@ -1635,6 +1665,9 @@ fn edit_menu(
     if menu_item(ui, true, "全选", "Ctrl+A") {
         op = Some(EditOp::SelectAll);
     }
+    let Some((save, cancel)) = extra else {
+        return op;
+    };
     if menu_item(ui, has_sel, "忽略复制 / 取消", "Ctrl+/") {
         op = Some(EditOp::Comment);
     }
@@ -2352,18 +2385,14 @@ impl App {
                     self.quick_focus = true;
                 }
                 let quick_id = Id::new("quick_add");
-                let resp = ui
-                    .scope(|ui| {
-                        input_visuals(ui);
-                        ui.add(
-                            TextEdit::singleline(&mut self.quick)
-                                .id(quick_id)
-                                .margin(input_margin())
-                                .hint_text("快速添加，# 加标签，回车保存")
-                                .desired_width(ui.available_width() - 200.0),
-                        )
-                    })
-                    .inner;
+                let w = ui.available_width() - 200.0;
+                let resp = input_with_menu(ui, quick_id, &mut self.quick, |b| {
+                    TextEdit::singleline(b)
+                        .margin(input_margin())
+                        .hint_text("快速添加，# 加标签，回车保存")
+                        .desired_width(w)
+                })
+                .resp;
                 if self.quick_focus {
                     resp.request_focus();
                     self.quick_focus = false;
@@ -2396,15 +2425,8 @@ impl App {
             ui.horizontal(|ui| {
                 ui.label("🔍");
                 let search_id = Id::new("search");
-                ui.scope(|ui| {
-                    input_visuals(ui);
-                    ui.add(
-                        TextEdit::singleline(&mut self.search)
-                            .id(search_id)
-                            .margin(input_margin())
-                            .hint_text("搜索")
-                            .desired_width(220.0),
-                    );
+                input_with_menu(ui, search_id, &mut self.search, |b| {
+                    TextEdit::singleline(b).margin(input_margin()).hint_text("搜索").desired_width(220.0)
                 });
                 if clear_button(ui, !self.search.is_empty()).on_hover_text("清空搜索").clicked() {
                     self.search.clear();
@@ -2487,17 +2509,11 @@ impl App {
                     let row = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
                     ui.allocate_ui_with_layout(row, egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let add = ui.button("＋").clicked();
-                        let r = ui
-                            .scope(|ui| {
-                                input_visuals(ui);
-                                ui.add(
-                                    TextEdit::singleline(&mut self.new_doc)
-                                        .margin(input_margin())
-                                        .hint_text("新建文档")
-                                        .desired_width(ui.available_width()),
-                                )
-                            })
-                            .inner;
+                        let w = ui.available_width();
+                        let r = input_with_menu(ui, Id::new("new_doc"), &mut self.new_doc, |b| {
+                            TextEdit::singleline(b).margin(input_margin()).hint_text("新建文档").desired_width(w)
+                        })
+                        .resp;
                         let enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
                         if add || enter {
                             let name = std::mem::take(&mut self.new_doc);
@@ -2899,12 +2915,18 @@ impl App {
                     _ => None,
                 };
                 if let Some(buf) = renaming {
-                    let r = ui.add(TextEdit::singleline(buf).desired_width(240.0));
+                    let rename_id = Id::new("rename_doc");
+                    let MenuEdit { resp: r, menu_open, .. } =
+                        input_with_menu(ui, rename_id, buf, |b| TextEdit::singleline(b).desired_width(240.0));
                     if self.rename_focus {
                         r.request_focus();
                         self.rename_focus = false;
                     }
-                    if r.lost_focus() {
+                    // 点右键菜单项时输入框会暂时失去焦点，不算改完；菜单被点外面关掉才算
+                    let menu_key = rename_id.with("menu_open");
+                    let menu_was_open = ui.data(|d| d.get_temp::<bool>(menu_key)).unwrap_or(false);
+                    ui.data_mut(|d| d.insert_temp(menu_key, menu_open));
+                    if !menu_open && (r.lost_focus() || (menu_was_open && !r.has_focus())) {
                         rename_done = Some(if ui.input(|i| i.key_pressed(Key::Escape)) {
                             None
                         } else {
@@ -4034,6 +4056,48 @@ mod ui_tests {
         h.run();
         assert_eq!(h.state().quick, "写脚本");
         assert_eq!(h.state().store.items.len(), 2);
+    }
+
+    /// 单行输入框（搜索）也有右键菜单：全选、复制后焦点和选区都还在
+    #[test]
+    fn search_box_context_menu() {
+        let mut h = harness("searchmenu", "- [ ] 线路 ^aaa111\n");
+        h.state_mut().search = "线路".into();
+        h.run();
+        let id = Id::new("search");
+        let rect = h.ctx.read_response(id).unwrap().rect;
+        click_at(&mut h, rect.center());
+        right_click(&mut h, rect.center());
+        assert!(h.query_by_label("剪切").is_some(), "搜索框右键没有菜单");
+        assert!(h.query_by_label("忽略复制 / 取消").is_none(), "单行输入框不该有 %% 菜单项");
+        h.get_by_label("全选").simulate_click();
+        h.run();
+        assert_eq!(selection(&h, id), Some((0, 2)), "全选没生效");
+        assert!(h.ctx.memory(|m| m.has_focus(id)), "点菜单后搜索框没拿回焦点");
+        right_click(&mut h, rect.center());
+        assert_eq!(selection(&h, id), Some((0, 2)), "右键后选区丢了");
+        h.get_by_label("剪切").simulate_click();
+        h.run();
+        assert_eq!(h.state().search, "");
+    }
+
+    /// 改标题时点右键菜单项不算改完
+    #[test]
+    fn rename_box_menu_does_not_commit() {
+        let mut h = harness("renamemenu", "- [ ] 一 ^aaa111\n");
+        let p = h.state_mut().store.create_doc("旧名").unwrap();
+        h.state_mut().goto(Sel::File(p.clone()));
+        h.run();
+        h.get_by_label("修改标题").simulate_click();
+        h.run();
+        let id = Id::new("rename_doc");
+        let rect = h.ctx.read_response(id).unwrap().rect;
+        right_click(&mut h, rect.center());
+        h.get_by_label("全选").simulate_click();
+        h.run();
+        assert!(h.state().rename.is_some(), "点菜单项后退出了改名");
+        assert!(h.ctx.memory(|m| m.has_focus(id)));
+        assert_eq!(selection(&h, id), Some((0, 2)), "全选没生效");
     }
 
     #[test]
