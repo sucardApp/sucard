@@ -1757,6 +1757,13 @@ fn item_row_content(
                 let enter = ui.memory(|m| m.has_focus(edit_id))
                     && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Enter));
                 let (_, buf, _) = editing.as_mut().unwrap();
+                // 和 egui 默认的排版一样，只是加上中文换行修正
+                let mut layouter = |ui: &Ui, text: &str, wrap: f32| {
+                    let v = ui.visuals();
+                    let color = v.override_text_color.unwrap_or(v.widgets.inactive.text_color());
+                    let font = egui::TextStyle::Body.resolve(ui.style());
+                    cjk_galley(ui, egui::text::LayoutJob::simple(text.to_owned(), font, color, wrap))
+                };
                 let MenuEdit { resp, menu_open, op } = text_edit_with_menu(
                     ui,
                     edit_id,
@@ -1764,7 +1771,7 @@ fn item_row_content(
                     ("保存", "回车"),
                     ("取消编辑", "Esc"),
                     |buf| TextEdit::multiline(buf).desired_rows(1).desired_width(f32::INFINITY),
-                    None,
+                    Some(&mut layouter),
                 );
                 if *edit_focus {
                     resp.request_focus();
@@ -2008,6 +2015,40 @@ fn fix_cjk_breaks(ui: &Ui, job: &mut egui::text::LayoutJob) {
             }
         }
     }
+}
+
+/// 编辑框用的中文换行修正。编辑框不能往文字里插换行（光标位置会对不上），
+/// 所以先按插好换行的版本排版，再把插进去的换行从排版结果里抹掉：
+/// 换行本身不占字形，只要把那一行标成“自动折行”而不是“换行结束”，字符数就和原文一致了。
+fn cjk_galley(ui: &Ui, job: egui::text::LayoutJob) -> Arc<egui::Galley> {
+    let mut fixed = job.clone();
+    fix_cjk_breaks(ui, &mut fixed);
+    if fixed.text.len() == job.text.len() {
+        return ui.fonts(|f| f.layout_job(job));
+    }
+    // 找出哪些换行是插进去的（按插好后的字符序号）
+    let mut inserted = std::collections::HashSet::new();
+    let mut orig = job.text.chars().peekable();
+    for (i, c) in fixed.text.chars().enumerate() {
+        if c == '\n' && orig.peek() != Some(&'\n') {
+            inserted.insert(i);
+        } else {
+            orig.next();
+        }
+    }
+    let mut g = (*ui.fonts(|f| f.layout_job(fixed))).clone();
+    let mut pos = 0;
+    for row in &mut g.rows {
+        pos += row.glyphs.len();
+        if row.ends_with_newline {
+            if inserted.contains(&pos) {
+                row.ends_with_newline = false;
+            }
+            pos += 1;
+        }
+    }
+    g.job = Arc::new(job);
+    Arc::new(g)
 }
 
 /// 「完整阅读」底部的操作按钮：平时没有边框，悬停时有浅底色
@@ -2741,7 +2782,7 @@ impl App {
                                 m.caches.cache::<HiCache>().get((&style, text))
                             });
                             job.wrap.max_width = wrap;
-                            ui.fonts(|f| f.layout_job(job))
+                            cjk_galley(ui, job)
                         };
                         let r = text_edit_with_menu(
                             ui,
@@ -3694,6 +3735,25 @@ mod ui_tests {
         st.store(&h.ctx, edit_id);
         h.run();
         edit_id
+    }
+
+    /// 编辑框的排版：冒号后面跟着网址时，冒号留在上一行，而且字符数和原文一致
+    #[test]
+    fn edit_galley_keeps_colon_on_previous_row() {
+        let text = "相关制作规范：https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let mut h = egui_kittest::Harness::new_ui(move |ui| {
+            let font = egui::TextStyle::Body.resolve(ui.style());
+            let w = ui.fonts(|f| f.layout_no_wrap("相关制作规范：".into(), font.clone(), Color32::WHITE).size().x);
+            let job = egui::text::LayoutJob::simple(text.to_owned(), font, Color32::WHITE, w + 30.0);
+            let raw = ui.fonts(|f| f.layout_job(job.clone()));
+            assert!(raw.rows[1].glyphs[0].chr == '：', "egui 原本就不会断在冒号前，测试没测到");
+            let g = cjk_galley(ui, job);
+            assert_eq!(g.text(), text);
+            let rows: Vec<String> = g.rows.iter().map(|r| r.glyphs.iter().map(|g| g.chr).collect()).collect();
+            assert_eq!(rows[0], "相关制作规范：");
+            assert_eq!(g.rows.iter().map(|r| r.char_count_including_newline()).sum::<usize>(), text.chars().count());
+        });
+        h.run();
     }
 
     #[test]
