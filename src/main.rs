@@ -1840,9 +1840,10 @@ fn item_row_content(
             ui.vertical(|ui| {
                 let edit_id = Id::new(("edit", it.id.as_str(), place));
                 // 多行编辑：回车保存，Shift+回车换行。
-                // 回车要在编辑框处理之前吃掉，否则它会先插入一个换行
+                // 回车要在编辑框处理之前吃掉，否则它会先插入一个换行。
+                // consume_key 会忽略多按的 Shift，所以按着 Shift 时要先排除，留给编辑框换行
                 let enter = ui.memory(|m| m.has_focus(edit_id))
-                    && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Enter));
+                    && ui.input_mut(|i| !i.modifiers.shift && i.consume_key(egui::Modifiers::NONE, Key::Enter));
                 let (_, buf, _) = editing.as_mut().unwrap();
                 // 和 egui 默认的排版一样，只是加上中文换行修正
                 let mut layouter = |ui: &Ui, text: &str, wrap: f32| {
@@ -4697,6 +4698,21 @@ mod ui_tests {
         h.get_by_label("取消").simulate_click();
         h.run();
         assert_eq!(h.state().store.items["aaa111"].text, "线路");
+    }
+
+    /// 编辑时 Shift+回车换行，不保存；回车才保存
+    #[test]
+    fn shift_enter_inserts_newline_while_editing() {
+        let mut h = harness("shiftenter", "- [ ] 线路 ^aaa111\n");
+        h.state_mut().apply(vec![Act::StartEdit("aaa111".into(), 0)]);
+        h.run();
+        h.press_key_modifiers(egui::Modifiers::SHIFT, Key::Enter);
+        h.run();
+        let (_, buf, _) = h.state().editing.clone().expect("Shift+回车不该退出编辑");
+        assert!(buf.contains('\n'), "Shift+回车应插入换行: {buf:?}");
+        h.press_key(Key::Enter);
+        h.run();
+        assert!(h.state().editing.is_none(), "回车应保存");
     }
 
     /// 确认框里的确认按钮（和页面上同名按钮区分：确认框在最上层，排在最后）
